@@ -172,13 +172,31 @@ nohup ffmpeg -stream_loop -1 -re -i '/root/file.mp4' -c:v copy -c:a copy -f flv 
 Prioritize these areas in order:
 
 1. Issue-first panels
-2. Stream matrix
-3. Group explorer
+2. Group operations matrix
+3. Stream matrix
 4. Event log
 
 Do not use the event feed as your main operational view.
 
 Use the left sidebar as your primary navigation. Each major area now has its own dedicated page instead of placing everything into one long screen.
+
+### Group operations matrix
+
+The customer backend now includes a dedicated group operations page for day-to-day work.
+
+Use it to:
+
+- rank groups by current issues
+- see server health under each group
+- identify streams that need recovery
+- run batch recovery for one server or one whole group
+
+Recommended usage:
+
+1. Keep the focus mode on `Priority`
+2. Handle the groups with issues first
+3. Expand only the affected server rows
+4. Use batch recovery for a server or group when multiple streams are down
 
 ## 9. Common issues
 

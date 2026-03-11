@@ -17,10 +17,19 @@ const state = {
     query: "",
     status: "all"
   },
+  opsFilters: {
+    query: "",
+    status: "all",
+    group: "all",
+    focus: "priority"
+  },
   explorerLevel: 2,
+  opsLevel: 1,
   collapsedGroups: {},
   collapsedServers: {},
-  collapsedNavGroups: {}
+  collapsedNavGroups: {},
+  collapsedOpsGroups: {},
+  collapsedOpsServers: {}
 };
 
 const ROLE_LABELS = {
@@ -120,6 +129,7 @@ function navGroupKey(title) {
 
 const PAGE_META = {
   overview: { title: "总览", description: "先看异常，再看客户空间、分组和恢复状态。" },
+  ops: { title: "分组运营矩阵", description: "按分组聚合异常、服务器状态和待恢复直播流，适合日常运营巡检与批量处理。" },
   matrix: { title: "直播矩阵", description: "按状态筛选全部直播流，适合快速检索和批量巡检。" },
   groups: { title: "分组巡检", description: "按分组、服务器、直播流三级展开，适合日常运营查看。" },
   servers: { title: "服务器管理", description: "维护 SSH 配置，并可一键识别当前正在直播的推流。" },
@@ -173,6 +183,7 @@ function pageGroupsForRole(role) {
       title: "控制台",
       items: [
         { page: "overview", label: "总览", meta: "异常与核心指标" },
+        { page: "ops", label: "分组运营", meta: "按分组运营与批量恢复" },
         { page: "matrix", label: "直播矩阵", meta: "当前空间直播检索" },
         { page: "groups", label: "分组巡检", meta: "三级结构视图" },
         { page: "servers", label: "服务器", meta: "SSH 与自动识别" },
@@ -446,21 +457,72 @@ function currentGroupTenantId(dashboard, user, current = null) {
   return state.draft.groupTenantId || current?.tenantId || dashboard.tenants?.[0]?.id || "";
 }
 
-function filteredStreams(dashboard) {
-  const query = state.filters.query.trim().toLowerCase();
-  const status = state.filters.status;
-  return dashboard.streams.filter((stream) => {
-    if (status !== "all" && stream.status !== status) return false;
-    if (!query) return true;
-    return [stream.label, stream.serverLabel, ...(stream.matchTerms ?? [])]
-      .join(" ")
-      .toLowerCase()
-      .includes(query);
-  });
+function matchesStreamFilters(stream, filters = state.filters) {
+  const query = String(filters.query ?? "").trim().toLowerCase();
+  const status = filters.status ?? "all";
+  if (status !== "all" && stream.status !== status) return false;
+  if (!query) return true;
+  return [
+    stream.label,
+    stream.serverLabel,
+    stream.sourcePath,
+    stream.streamKey,
+    ...(stream.matchTerms ?? [])
+  ]
+    .join(" ")
+    .toLowerCase()
+    .includes(query);
+}
+
+function filteredStreams(dashboard, filters = state.filters) {
+  return dashboard.streams.filter((stream) => matchesStreamFilters(stream, filters));
 }
 
 function explorerGroupKey(group) {
   return `${group.tenantId ?? "global"}:${normalizeGroupName(group.name)}`;
+}
+
+function availableGroupNames(dashboard) {
+  return [...new Set(dashboard.servers.map((server) => normalizeGroupName(server.groupName)))]
+    .sort((a, b) => a.localeCompare(b, "zh-CN"));
+}
+
+function parseIdList(value) {
+  return [...new Set(String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean))];
+}
+
+async function recoverStreamBatch(streamIds, label = "批量恢复") {
+  const ids = parseIdList(streamIds);
+  if (ids.length === 0) {
+    throw new Error("当前没有可恢复的异常直播流。");
+  }
+
+  let successCount = 0;
+  const failures = [];
+
+  for (const streamId of ids) {
+    try {
+      await api(`/api/streams/${encodeURIComponent(streamId)}/recover`, { method: "POST" });
+      successCount += 1;
+    } catch (error) {
+      failures.push(error.message);
+    }
+  }
+
+  await refreshAdmin();
+
+  if (successCount === 0) {
+    throw new Error(`${label}失败：${failures[0] ?? "没有任何直播流恢复成功。"} `);
+  }
+
+  if (failures.length > 0) {
+    return `${label}完成，成功 ${successCount} 路，失败 ${failures.length} 路。`;
+  }
+
+  return `${label}完成，已提交 ${successCount} 路异常直播流的恢复请求。`;
 }
 
 function ensureVisibleAuthCards(mode, setupRequired) {
@@ -1018,6 +1080,269 @@ function renderStreamViews(dashboard) {
     `).join("");
 }
 
+function buildOperationsGroups(dashboard) {
+  const filters = state.opsFilters;
+  const query = String(filters.query ?? "").trim().toLowerCase();
+  const selectedGroup = normalizeGroupName(filters.group ?? "all");
+  const focus = filters.focus ?? "priority";
+  const groups = new Map();
+
+  for (const server of dashboard.servers) {
+    const groupName = normalizeGroupName(server.groupName);
+    if (selectedGroup !== "all" && groupName !== selectedGroup) continue;
+
+    const allStreams = dashboard.streams.filter((stream) => stream.serverId === server.id);
+    const matchedStreams = filteredStreams({ streams: allStreams }, {
+      query: filters.query,
+      status: filters.status
+    });
+    const issueStreams = matchedStreams.filter((stream) => stream.enabled && stream.status !== "healthy");
+    const healthyStreams = matchedStreams.filter((stream) => stream.enabled && stream.status === "healthy");
+    const allRecoverableStreams = allStreams.filter((stream) => stream.enabled && stream.status !== "healthy");
+    const serverMatchesQuery = !query || [
+      server.label,
+      server.host,
+      groupName,
+      ...allStreams.flatMap((stream) => [stream.label, stream.sourcePath, stream.streamKey])
+    ].join(" ").toLowerCase().includes(query);
+    const serverHasIssue = server.enabled && (server.connectionStatus !== "up" || allRecoverableStreams.length > 0);
+
+    let visibleStreams = matchedStreams;
+    let hiddenHealthyCount = 0;
+    if (focus === "issues") {
+      visibleStreams = issueStreams;
+    } else if (focus === "priority") {
+      visibleStreams = issueStreams.length > 0
+        ? [...issueStreams, ...healthyStreams]
+        : healthyStreams.slice(0, 3);
+      hiddenHealthyCount = issueStreams.length === 0 ? Math.max(0, healthyStreams.length - visibleStreams.length) : 0;
+    }
+
+    if (focus === "issues" && !serverHasIssue && visibleStreams.length === 0) {
+      continue;
+    }
+
+    if ((query || filters.status !== "all") && !serverMatchesQuery && visibleStreams.length === 0) {
+      continue;
+    }
+
+    const key = explorerGroupKey({ tenantId: server.tenantId, name: groupName });
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: null,
+        tenantId: server.tenantId,
+        name: groupName,
+        notes: "",
+        servers: [],
+        serverCount: 0,
+        offlineServerCount: 0,
+        problemServerCount: 0,
+        streamCount: 0,
+        healthyStreamCount: 0,
+        problemStreamCount: 0,
+        recoverableStreamIds: []
+      });
+    }
+
+    const group = groups.get(key);
+    group.servers.push({
+      ...server,
+      groupName,
+      allStreams,
+      visibleStreams,
+      matchedStreams,
+      issueStreams,
+      healthyStreams,
+      hiddenHealthyCount,
+      recoverableStreamIds: allRecoverableStreams.map((stream) => stream.id),
+      problemStreamCount: allRecoverableStreams.length,
+      healthyStreamCount: allStreams.filter((stream) => stream.status === "healthy").length,
+      totalStreamCount: allStreams.length,
+      hasIssue: serverHasIssue
+    });
+    group.serverCount += 1;
+    group.streamCount += allStreams.length;
+    group.healthyStreamCount += allStreams.filter((stream) => stream.status === "healthy").length;
+    group.problemStreamCount += allRecoverableStreams.length;
+    group.offlineServerCount += server.connectionStatus !== "up" ? 1 : 0;
+    group.problemServerCount += serverHasIssue ? 1 : 0;
+    group.recoverableStreamIds.push(...allRecoverableStreams.map((stream) => stream.id));
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      recoverableStreamIds: [...new Set(group.recoverableStreamIds)],
+      servers: group.servers.sort((a, b) => {
+        const attentionDelta = Number(b.hasIssue) - Number(a.hasIssue);
+        if (attentionDelta !== 0) return attentionDelta;
+        return a.label.localeCompare(b.label, "zh-CN");
+      })
+    }))
+    .filter((group) => group.servers.length > 0)
+    .sort((a, b) => {
+      const attentionDelta = (b.problemStreamCount + b.offlineServerCount * 2) - (a.problemStreamCount + a.offlineServerCount * 2);
+      if (attentionDelta !== 0) return attentionDelta;
+      return a.name.localeCompare(b.name, "zh-CN");
+    });
+}
+
+function renderOperationsFilters(dashboard) {
+  const queryInput = qs("#opsSearch");
+  if (queryInput && queryInput.value !== state.opsFilters.query) {
+    queryInput.value = state.opsFilters.query;
+  }
+
+  const statusSelect = qs("#opsStatusFilter");
+  if (statusSelect) {
+    statusSelect.value = state.opsFilters.status;
+  }
+
+  const focusSelect = qs("#opsFocusFilter");
+  if (focusSelect) {
+    focusSelect.value = state.opsFilters.focus;
+  }
+
+  const groupSelect = qs("#opsGroupFilter");
+  if (groupSelect) {
+    groupSelect.innerHTML = `
+      <option value="all">全部分组</option>
+      ${availableGroupNames(dashboard).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}
+    `;
+    groupSelect.value = state.opsFilters.group;
+  }
+}
+
+function renderOperationsSummary(groups) {
+  const totalGroups = groups.length;
+  const problemGroups = groups.filter((group) => group.problemServerCount > 0 || group.problemStreamCount > 0).length;
+  const offlineServers = groups.reduce((sum, group) => sum + group.offlineServerCount, 0);
+  const problemStreams = groups.reduce((sum, group) => sum + group.problemStreamCount, 0);
+
+  qs("#opsSummary").innerHTML = [
+    ["当前分组", totalGroups, "当前筛选结果"],
+    ["异常分组", problemGroups, "优先处理对象"],
+    ["离线服务器", offlineServers, "连接异常需先排查"],
+    ["待恢复直播流", problemStreams, "支持分组级批量恢复"]
+  ].map(([label, value, detail]) => `
+    <article class="metric compact">
+      <div class="metric-label">${escapeHtml(label)}</div>
+      <div class="metric-value">${escapeHtml(value)}</div>
+      <div class="muted">${escapeHtml(detail)}</div>
+    </article>
+  `).join("");
+}
+
+function renderOperationsToolbar(groups) {
+  const buttons = [
+    ["0", "仅分组"],
+    ["1", "分组 + 服务器"],
+    ["2", "完整展开"]
+  ];
+  qs("#opsLevelToolbar").innerHTML = `
+    <span class="badge">${groups.length} 个分组视角</span>
+    ${buttons.map(([value, label]) => `
+      <button class="toggle-chip" type="button" data-action="set-ops-level" data-level="${value}" data-active="${String(Number(value) === state.opsLevel)}">${label}</button>
+    `).join("")}
+  `;
+}
+
+function renderOperationsMatrix(dashboard) {
+  const groups = buildOperationsGroups(dashboard);
+  renderOperationsFilters(dashboard);
+  renderOperationsSummary(groups);
+  renderOperationsToolbar(groups);
+  qs("#opsMatrixBadge").textContent = state.opsFilters.focus === "issues"
+    ? "仅显示异常优先对象"
+    : state.opsFilters.focus === "priority"
+      ? "异常优先排序"
+      : "显示全部分组";
+
+  qs("#opsGroupMatrix").innerHTML = groups.length === 0
+    ? '<div class="empty">当前筛选条件下没有可展示的分组运营数据。</div>'
+    : groups.map((group) => {
+      const groupKey = explorerGroupKey(group);
+      const groupCollapsed = Boolean(state.collapsedOpsGroups[groupKey]);
+      const groupHealthPercent = group.streamCount > 0 ? Math.round((group.healthyStreamCount / group.streamCount) * 100) : 100;
+      return `
+        <article class="ops-group-card">
+          <div class="ops-group-header">
+            <div class="explorer-main">
+              <button class="toggle-icon" type="button" data-action="toggle-ops-group" data-key="${escapeHtml(groupKey)}">${groupCollapsed ? "＋" : "－"}</button>
+              <div>
+                <div class="status-pill ${group.problemStreamCount > 0 || group.offlineServerCount > 0 ? "status-failed" : "status-healthy"}">
+                  ${group.problemStreamCount > 0 || group.offlineServerCount > 0 ? "需处理" : "稳定"}
+                </div>
+                <div class="title">${escapeHtml(group.name)}</div>
+                <div class="subtle">${group.serverCount} 台服务器 · ${group.healthyStreamCount}/${group.streamCount} 路正常直播流${group.notes ? ` · ${escapeHtml(group.notes)}` : ""}</div>
+              </div>
+            </div>
+            <div class="card-actions">
+              <span class="badge">稳定率 ${escapeHtml(groupHealthPercent)}%</span>
+              ${group.recoverableStreamIds.length > 0 ? `<button class="button secondary" data-action="recover-group-streams" data-key="${escapeHtml(group.name)}" data-stream-ids="${escapeHtml(group.recoverableStreamIds.join(","))}">恢复本组异常</button>` : ""}
+              <button class="button ghost" data-page-nav="groups">打开巡检页</button>
+            </div>
+          </div>
+          <div class="ops-stat-grid">
+            <article class="ops-stat-card"><span>异常服务器</span><strong>${group.problemServerCount}</strong></article>
+            <article class="ops-stat-card"><span>离线服务器</span><strong>${group.offlineServerCount}</strong></article>
+            <article class="ops-stat-card"><span>待恢复直播流</span><strong>${group.problemStreamCount}</strong></article>
+            <article class="ops-stat-card"><span>正常直播流</span><strong>${group.healthyStreamCount}</strong></article>
+          </div>
+          <div class="usage-track"><div class="usage-fill" style="width:${groupHealthPercent}%"></div></div>
+          ${state.opsLevel < 1 ? "" : `
+            <div class="ops-server-list ${groupCollapsed ? "hidden" : ""}">
+              ${group.servers.map((server) => {
+                const serverCollapsed = Boolean(state.collapsedOpsServers[server.id]);
+                const streamHealthPercent = server.totalStreamCount > 0 ? Math.round((server.healthyStreamCount / server.totalStreamCount) * 100) : 100;
+                return `
+                  <article class="ops-server-card">
+                    <div class="ops-server-header">
+                      <div class="explorer-main">
+                        <button class="toggle-icon" type="button" data-action="toggle-ops-server" data-id="${escapeHtml(server.id)}">${serverCollapsed ? "＋" : "－"}</button>
+                        <div>
+                          <div class="status-pill ${statusClass(server.connectionStatus)}">${escapeHtml(statusLabel(server.connectionStatus))}</div>
+                          <div class="title">${escapeHtml(server.label)}</div>
+                          <div class="subtle">${escapeHtml(server.host)} · 正常 ${server.healthyStreamCount}/${server.totalStreamCount} · 异常 ${server.problemStreamCount}</div>
+                        </div>
+                      </div>
+                      <div class="card-actions">
+                        ${server.recoverableStreamIds.length > 0 ? `<button class="button ghost" data-action="recover-server-streams" data-id="${escapeHtml(server.id)}" data-stream-ids="${escapeHtml(server.recoverableStreamIds.join(","))}">恢复该机异常</button>` : ""}
+                        <button class="button ghost" data-action="edit-server" data-id="${escapeHtml(server.id)}">查看服务器</button>
+                      </div>
+                    </div>
+                    <div class="usage-track"><div class="usage-fill" style="width:${streamHealthPercent}%"></div></div>
+                    ${state.opsLevel < 2 ? "" : `
+                      <div class="ops-stream-list ${serverCollapsed ? "hidden" : ""}">
+                        ${server.visibleStreams.length === 0
+                          ? '<div class="empty">当前服务器在此筛选条件下没有直播流需要展示。</div>'
+                          : server.visibleStreams.map((stream) => `
+                            <article class="ops-stream-row">
+                              <div>
+                                <div class="status-pill ${statusClass(stream.status)}">${escapeHtml(statusLabel(stream.status))}</div>
+                                <div class="title">${escapeHtml(stream.label)}</div>
+                                <div class="subtle">${escapeHtml(formatTime(stream.lastSeenAt))} · ${escapeHtml(stream.serverLabel ?? server.label)}</div>
+                                ${streamIdentityHtml(stream)}
+                              </div>
+                              <div class="card-actions">
+                                ${stream.status !== "healthy" ? `<button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>` : ""}
+                                <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">查看</button>
+                              </div>
+                            </article>
+                          `).join("")}
+                        ${server.hiddenHealthyCount > 0 ? `<div class="subtle">还有 ${server.hiddenHealthyCount} 路稳定直播流已折叠，可切到“显示全部分组”查看。</div>` : ""}
+                      </div>
+                    `}
+                  </article>
+                `;
+              }).join("")}
+            </div>
+          `}
+        </article>
+      `;
+    }).join("");
+}
+
 function buildExplorerGroups(dashboard) {
   const visibleStreams = filteredStreams(dashboard);
   const visibleStreamIds = new Set(visibleStreams.map((stream) => stream.id));
@@ -1299,6 +1624,7 @@ function renderDashboard(payload) {
   renderProblemLists(payload.dashboard);
   renderServerList(payload.dashboard);
   renderStreamViews(payload.dashboard);
+  renderOperationsMatrix(payload.dashboard);
   renderGroupExplorer(payload.dashboard);
   renderEvents(payload.dashboard);
   renderSuperAdmin(payload.dashboard, payload.user);
@@ -1358,7 +1684,7 @@ async function submitLogin(form, mode) {
 async function onActionClick(event) {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (!button) return;
-  const { action, id, key, level } = button.dataset;
+  const { action, id, key, level, streamIds } = button.dataset;
 
   try {
     if (action === "edit-group") {
@@ -1462,9 +1788,31 @@ async function onActionClick(event) {
       renderSidebarNavigation(state.session);
       return;
     }
+    if (action === "toggle-ops-group") {
+      state.collapsedOpsGroups[key] = !state.collapsedOpsGroups[key];
+      renderOperationsMatrix(state.dashboard);
+      return;
+    }
+    if (action === "toggle-ops-server") {
+      state.collapsedOpsServers[id] = !state.collapsedOpsServers[id];
+      renderOperationsMatrix(state.dashboard);
+      return;
+    }
+    if (action === "recover-group-streams") {
+      return showToast(await recoverStreamBatch(streamIds, `分组 ${key} 批量恢复`));
+    }
+    if (action === "recover-server-streams") {
+      const server = state.dashboard.servers.find((item) => item.id === id);
+      return showToast(await recoverStreamBatch(streamIds, `${server?.label ?? "服务器"} 批量恢复`));
+    }
     if (action === "set-explorer-level") {
       state.explorerLevel = Number(level);
       renderGroupExplorer(state.dashboard);
+      return;
+    }
+    if (action === "set-ops-level") {
+      state.opsLevel = Number(level);
+      renderOperationsMatrix(state.dashboard);
     }
   } catch (error) {
     showToast(error.message, true);
@@ -1531,6 +1879,10 @@ function bindEvents() {
     state.session = null;
     state.dashboard = null;
     state.filters = { query: "", status: "all" };
+    state.opsFilters = { query: "", status: "all", group: "all", focus: "priority" };
+    state.opsLevel = 1;
+    state.collapsedOpsGroups = {};
+    state.collapsedOpsServers = {};
     resetDrafts();
     renderAuth(false);
   });
@@ -1569,6 +1921,36 @@ function bindEvents() {
     if (state.dashboard) {
       renderStreamViews(state.dashboard);
       renderGroupExplorer(state.dashboard);
+    }
+  });
+
+  qs("#opsSearch").addEventListener("input", (event) => {
+    state.opsFilters.query = event.currentTarget.value;
+    if (state.dashboard) {
+      renderOperationsMatrix(state.dashboard);
+    }
+  });
+
+  qs("#opsStatusFilter").addEventListener("change", (event) => {
+    state.opsFilters.status = event.currentTarget.value;
+    if (state.dashboard) {
+      renderOperationsMatrix(state.dashboard);
+    }
+  });
+
+  qs("#opsGroupFilter").addEventListener("change", (event) => {
+    state.opsFilters.group = event.currentTarget.value;
+    state.collapsedOpsGroups = {};
+    state.collapsedOpsServers = {};
+    if (state.dashboard) {
+      renderOperationsMatrix(state.dashboard);
+    }
+  });
+
+  qs("#opsFocusFilter").addEventListener("change", (event) => {
+    state.opsFilters.focus = event.currentTarget.value;
+    if (state.dashboard) {
+      renderOperationsMatrix(state.dashboard);
     }
   });
 

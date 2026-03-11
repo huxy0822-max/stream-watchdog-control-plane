@@ -495,6 +495,13 @@ body[data-role="customer"] {
   margin-bottom: 16px;
 }
 
+.ops-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .explorer-toolbar,
 .guide-links {
   display: flex;
@@ -785,6 +792,69 @@ textarea {
   gap: 16px;
 }
 
+.ops-group-grid,
+.ops-server-list,
+.ops-stream-list {
+  display: grid;
+  gap: 14px;
+}
+
+.ops-group-card,
+.ops-server-card,
+.ops-stream-row,
+.ops-stat-card {
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: var(--panel-strong);
+}
+
+.ops-group-card,
+.ops-server-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.ops-group-header,
+.ops-server-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ops-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.ops-stat-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+}
+
+.ops-stat-card span {
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.ops-stat-card strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.ops-stream-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
 .explorer-head,
 .explorer-main {
   display: flex;
@@ -913,6 +983,7 @@ h4 {
   .resource-layout,
   .resource-grid,
   .form-grid.two-col,
+  .ops-toolbar,
   .panel-toolbar,
   .workspace-snapshot-grid,
   .explorer-head {
@@ -920,7 +991,10 @@ h4 {
   }
 
   .explorer-head,
-  .explorer-main {
+  .explorer-main,
+  .ops-group-header,
+  .ops-server-header,
+  .ops-stream-row {
     flex-direction: column;
   }
 }

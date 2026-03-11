@@ -201,6 +201,49 @@
             </section>
           </section>
 
+          <section class="page-section hidden" data-page="ops">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">GROUP OPS</p>
+                  <h3>分组运营矩阵</h3>
+                </div>
+                <span id="opsMatrixBadge" class="badge">异常优先排序</span>
+              </div>
+              <div class="ops-toolbar">
+                <input id="opsSearch" type="search" placeholder="搜索分组、服务器、文件名或推流码" />
+                <select id="opsStatusFilter">
+                  <option value="all">全部状态</option>
+                  <option value="healthy">healthy</option>
+                  <option value="restarting">restarting</option>
+                  <option value="cooldown">cooldown</option>
+                  <option value="failed">failed</option>
+                  <option value="unknown">unknown</option>
+                </select>
+                <select id="opsGroupFilter">
+                  <option value="all">全部分组</option>
+                </select>
+                <select id="opsFocusFilter">
+                  <option value="priority">异常优先</option>
+                  <option value="issues">仅异常对象</option>
+                  <option value="all">显示全部分组</option>
+                </select>
+              </div>
+              <div id="opsSummary" class="metrics compact-metrics"></div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">OPS MATRIX</p>
+                  <h3>按分组运营处理</h3>
+                </div>
+                <div id="opsLevelToolbar" class="explorer-toolbar"></div>
+              </div>
+              <div id="opsGroupMatrix" class="ops-group-grid"></div>
+            </section>
+          </section>
+
           <section class="page-section hidden" data-page="matrix">
             <section class="panel">
               <div class="panel-header">

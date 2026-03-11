@@ -12,6 +12,7 @@ This repository is now structured as an English-first project with a browser das
 - Separate auth routes for platform admin, customer ops, and CDK activation
 - Public root only shows customer and CDK access; super admin is direct-route only
 - Group-based hierarchy: `group -> server -> stream`
+- Customer-facing group operations matrix with issue-first batch recovery
 - Manual recovery, scheduled checks, cooldown and restart-window protection
 - Managed stream creation from only a media filename/path and YouTube stream key
 - One-click SSH discovery/import of currently running YouTube `ffmpeg` streams
@@ -160,6 +161,7 @@ Implemented now:
 - CDK summary cards and latest-batch copy panel
 - SSH live-stream discovery/import from remote servers
 - group management and collapsible hierarchy explorer
+- customer group operations matrix with group/server batch recovery
 - infrastructure metrics for super admin
 - browser dashboard with customer/admin separation and direct-route-only admin entry
 - CRM-style sidebar navigation and dedicated module pages

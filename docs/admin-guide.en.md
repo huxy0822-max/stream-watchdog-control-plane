@@ -30,6 +30,8 @@ The super-admin dashboard can manage:
 
 Customer users cannot see those platform-wide controls.
 
+Customer operators now also have a stronger dedicated **Group Operations Matrix** page for issue-first daily handling. That reduces the need to operate from the generic stream list.
+
 ## 3. Recommended onboarding flow
 
 ### Option A: You create the customer workspace manually
