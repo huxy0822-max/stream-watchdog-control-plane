@@ -24,6 +24,7 @@ The super-admin dashboard can manage:
 - platform runtime settings
 - email notification settings
 - control-plane host and application resource usage
+- separate login portals and customer activation flow
 
 Customer users cannot see those platform-wide controls.
 
@@ -93,6 +94,15 @@ Encourage customers to group by:
 - business unit
 - primary vs backup
 
+Also train them to use the simplified stream onboarding flow:
+
+- choose a server
+- enter media filename or full path
+- enter YouTube stream key
+- click **Save and Start**
+
+This avoids customers writing raw `ffmpeg` commands unless they truly need a custom advanced flow.
+
 ## 7. Runtime settings
 
 Main controls:
@@ -151,3 +161,20 @@ At minimum validate:
 - stream save works
 - manual run-once works
 - manual recovery works
+
+## 11. GitHub automation included in this repo
+
+This repository now ships with:
+
+- Node.js CI
+- GitHub Packages publish workflow
+- Datadog Synthetics workflow
+
+Configure these when you are ready:
+
+- `DD_API_KEY` secret
+- `DD_APP_KEY` secret
+- `DD_SYNTHETICS_PUBLIC_IDS` variable
+- optional `DATADOG_SITE` variable
+
+The Datadog workflow is designed to skip cleanly until those values exist.

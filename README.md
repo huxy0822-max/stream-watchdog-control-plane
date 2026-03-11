@@ -9,8 +9,10 @@ This repository is now structured as an English-first project with a browser das
 
 - Multi-server monitoring and automatic restart for `ffmpeg` live streams
 - Issue-first dashboard with separate views for super admin and customer operators
+- Separate auth routes for platform admin, customer ops, and CDK activation
 - Group-based hierarchy: `group -> server -> stream`
 - Manual recovery, scheduled checks, cooldown and restart-window protection
+- Managed stream creation from only a media filename/path and YouTube stream key
 - Customer workspaces, customer users, and CDK-based activation
 - SQLite-backed state instead of local-only JSON scripts
 - Built-in email notification settings
@@ -79,6 +81,12 @@ http://127.0.0.1:3030
 
 On the first visit, create the super-admin account through the bootstrap page.
 
+After bootstrap, the direct auth routes are:
+
+- `/admin/login`
+- `/customer/login`
+- `/redeem`
+
 ## Repository layout
 
 - `src/`: backend, monitoring engine, auth, database, web server
@@ -110,6 +118,23 @@ docker compose up -d --build
 ```
 
 By default the compose file binds the app to `127.0.0.1:3030`, so you can place Nginx or another reverse proxy in front of it.
+
+## GitHub automation
+
+This repository includes:
+
+- `.github/workflows/nodejs-ci.yml`
+- `.github/workflows/publish-github-packages.yml`
+- `.github/workflows/datadog-synthetics.yml`
+
+To enable Datadog Synthetics, configure:
+
+- `DD_API_KEY` secret
+- `DD_APP_KEY` secret
+- `DD_SYNTHETICS_PUBLIC_IDS` repository variable
+- optional `DATADOG_SITE` repository variable
+
+The GitHub Packages workflow publishes `@huxy0822-max/stream-watchdog-control-plane` to GitHub Packages on manual trigger or release publish.
 
 ## What is intentionally not committed
 

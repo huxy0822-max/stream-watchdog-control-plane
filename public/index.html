@@ -41,12 +41,18 @@
         </form>
       </section>
 
-      <section id="loginHub" class="auth-grid hidden">
-        <section class="auth-card auth-card-admin">
+      <section id="loginHub" class="auth-grid hidden" data-layout="grid">
+        <section id="adminLoginCard" class="auth-card auth-card-admin" data-auth-card="admin">
           <p class="eyebrow">PLATFORM ADMIN</p>
           <h2>超级管理员入口</h2>
           <p class="muted">用于平台配置、客户空间、CDK、资源巡检和全局管理。</p>
-          <form id="adminLoginForm" class="form-grid">
+          <div class="auth-entry-actions">
+            <a class="button primary auth-entry-link" href="/admin/login">打开管理员登录</a>
+          </div>
+          <div class="auth-route-actions hidden">
+            <a class="button ghost small" href="/">返回入口页</a>
+          </div>
+          <form id="adminLoginForm" class="form-grid auth-form">
             <label>
               <span>管理员账号</span>
               <input name="username" autocomplete="username" required />
@@ -59,11 +65,17 @@
           </form>
         </section>
 
-        <section class="auth-card auth-card-customer">
+        <section id="customerLoginCard" class="auth-card auth-card-customer" data-auth-card="customer">
           <p class="eyebrow">CUSTOMER OPS</p>
           <h2>普通用户 / VIP 用户入口</h2>
           <p class="muted">用于查看自己分组下的服务器和直播流，执行恢复，维护本空间配置。</p>
-          <form id="customerLoginForm" class="form-grid">
+          <div class="auth-entry-actions">
+            <a class="button secondary auth-entry-link" href="/customer/login">打开用户登录</a>
+          </div>
+          <div class="auth-route-actions hidden">
+            <a class="button ghost small" href="/">返回入口页</a>
+          </div>
+          <form id="customerLoginForm" class="form-grid auth-form">
             <label>
               <span>账号</span>
               <input name="username" autocomplete="username" required />
@@ -76,11 +88,17 @@
           </form>
         </section>
 
-        <section id="redeemCard" class="auth-card auth-card-redeem">
+        <section id="redeemCard" class="auth-card auth-card-redeem" data-auth-card="redeem">
           <p class="eyebrow">OPEN WITH CDK</p>
           <h2>使用 CDK 开通</h2>
           <p class="muted">新客户可以用兑换码直接创建自己的空间和管理员账号。</p>
-          <form id="redeemForm" class="form-grid">
+          <div class="auth-entry-actions">
+            <a class="button ghost auth-entry-link" href="/redeem">进入 CDK 开通</a>
+          </div>
+          <div class="auth-route-actions hidden">
+            <a class="button ghost small" href="/">返回入口页</a>
+          </div>
+          <form id="redeemForm" class="form-grid auth-form">
             <label>
               <span>兑换码</span>
               <input name="code" required />
@@ -330,7 +348,9 @@
             <span id="streamListBadge" class="badge">按筛选结果显示</span>
           </div>
           <form id="streamForm" class="form-grid two-col"></form>
+          <div class="subtle">填写媒体文件名和推流码后，系统会自动生成 ffmpeg 重推命令。新建时不填直播流名称会默认使用文件名。</div>
           <div class="inline-actions">
+            <button id="saveAndStartStreamButton" class="button secondary" type="button">保存并立即开播</button>
             <button id="saveStreamButton" class="button primary" type="button">保存直播流</button>
             <button id="resetStreamButton" class="button ghost" type="button">清空表单</button>
           </div>

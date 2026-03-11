@@ -43,6 +43,77 @@ function normalizeGroupName(value) {
   return String(value ?? "").trim() || "Default";
 }
 
+function normalizeStreamKey(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^rtmp:\/\/[^/]+\/live2\//i, "")
+    .replace(/^live2\//i, "")
+    .trim();
+}
+
+function normalizeMediaPath(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.includes("/") ? normalized : `/root/${normalized}`;
+}
+
+function shellSingleQuote(value) {
+  return `'${String(value ?? "").replace(/'/g, `'\\''`)}'`;
+}
+
+function buildManagedRestartCommand(sourcePath, streamKey) {
+  const normalizedSource = normalizeMediaPath(sourcePath);
+  const normalizedKey = normalizeStreamKey(streamKey);
+  if (!normalizedSource || !normalizedKey) {
+    return "";
+  }
+
+  const rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${normalizedKey}`;
+  return `nohup ffmpeg -stream_loop -1 -re -i ${shellSingleQuote(normalizedSource)} -c:v copy -c:a copy -f flv ${shellSingleQuote(rtmpUrl)} > /dev/null 2>&1 &`;
+}
+
+function buildManagedMatchTerms(sourcePath, streamKey) {
+  return [...new Set([
+    normalizeStreamKey(streamKey),
+    normalizeMediaPath(sourcePath)
+  ].filter(Boolean))];
+}
+
+function unquoteShellToken(value) {
+  const text = String(value ?? "").trim();
+  if (
+    (text.startsWith("'") && text.endsWith("'")) ||
+    (text.startsWith('"') && text.endsWith('"'))
+  ) {
+    return text.slice(1, -1);
+  }
+
+  return text;
+}
+
+function parseManagedStreamFields(...commands) {
+  for (const command of commands) {
+    const text = String(command ?? "").trim();
+    if (!text) {
+      continue;
+    }
+
+    const sourceMatch = text.match(/(?:^|\s)-i\s+('(?:[^']|\\')*'|"(?:[^"\\]|\\.)*"|\S+)/);
+    const streamKeyMatch = text.match(/rtmp:\/\/[^/\s'"]+\/live2\/([A-Za-z0-9-]+)/i);
+    const sourcePath = sourceMatch ? normalizeMediaPath(unquoteShellToken(sourceMatch[1])) : "";
+    const streamKey = streamKeyMatch ? normalizeStreamKey(streamKeyMatch[1]) : "";
+
+    if (sourcePath || streamKey) {
+      return { sourcePath, streamKey };
+    }
+  }
+
+  return { sourcePath: "", streamKey: "" };
+}
+
 function isExpired(expiresAt) {
   if (!expiresAt) {
     return false;
@@ -1194,27 +1265,34 @@ export class AppDatabase {
       JOIN server_configs ON server_configs.id = stream_configs.server_id
       ${scope.where}
       ORDER BY stream_configs.created_at ASC
-    `).all(...scope.params).map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id ?? null,
-      serverId: row.server_id,
-      serverLabel: row.server_label,
-      label: row.label,
-      matchTerms: parseJson(row.match_terms_json, []),
-      restartCommand: row.restart_command ?? "",
-      restartLogPath: row.restart_log_path ?? "",
-      discoveredCommand: includeSecrets ? (decryptText(row.discovered_command_enc, this.masterKey) ?? "") : "",
-      cooldownSeconds: Number(row.cooldown_seconds),
-      restartWindowSeconds: Number(row.restart_window_seconds),
-      maxRestartsInWindow: Number(row.max_restarts_in_window),
-      verifyDelaySeconds: Number(row.verify_delay_seconds ?? 0),
-      enabled: toBoolean(row.enabled),
-      status: row.status,
-      lastSeenAt: row.last_seen_at,
-      lastRestartAt: row.last_restart_at,
-      restartHistory: parseJson(row.restart_history_json, []),
-      lastError: row.last_error
-    }));
+    `).all(...scope.params).map((row) => {
+      const discoveredCommand = decryptText(row.discovered_command_enc, this.masterKey) ?? "";
+      const managed = parseManagedStreamFields(row.restart_command ?? "", discoveredCommand);
+      return {
+        id: row.id,
+        tenantId: row.tenant_id ?? null,
+        serverId: row.server_id,
+        serverLabel: row.server_label,
+        label: row.label,
+        matchTerms: parseJson(row.match_terms_json, []),
+        restartCommand: row.restart_command ?? "",
+        restartLogPath: row.restart_log_path ?? "",
+        discoveredCommand: includeSecrets ? discoveredCommand : "",
+        sourcePath: managed.sourcePath,
+        sourceFileName: managed.sourcePath ? path.basename(managed.sourcePath) : "",
+        streamKey: managed.streamKey,
+        cooldownSeconds: Number(row.cooldown_seconds),
+        restartWindowSeconds: Number(row.restart_window_seconds),
+        maxRestartsInWindow: Number(row.max_restarts_in_window),
+        verifyDelaySeconds: Number(row.verify_delay_seconds ?? 0),
+        enabled: toBoolean(row.enabled),
+        status: row.status,
+        lastSeenAt: row.last_seen_at,
+        lastRestartAt: row.last_restart_at,
+        restartHistory: parseJson(row.restart_history_json, []),
+        lastError: row.last_error
+      };
+    });
   }
 
   saveStream(input, actor = null) {
@@ -1227,13 +1305,33 @@ export class AppDatabase {
       throw new Error("You do not have access to this stream.");
     }
 
+    const currentManaged = current
+      ? parseManagedStreamFields(
+          current.restart_command ?? "",
+          decryptText(current.discovered_command_enc, this.masterKey) ?? ""
+        )
+      : { sourcePath: "", streamKey: "" };
+
+    const hasExplicitSourcePath = Object.prototype.hasOwnProperty.call(input, "sourcePath");
+    const hasExplicitStreamKey = Object.prototype.hasOwnProperty.call(input, "streamKey");
+    const sourcePath = normalizeMediaPath(hasExplicitSourcePath ? input.sourcePath : currentManaged.sourcePath);
+    const streamKey = normalizeStreamKey(hasExplicitStreamKey ? input.streamKey : currentManaged.streamKey);
+    const managedMode = Boolean(sourcePath || streamKey);
+
+    if (managedMode && (!sourcePath || !streamKey)) {
+      throw new Error("Media file and stream key are both required.");
+    }
+
+    const fallbackMatchTerms = managedMode ? buildManagedMatchTerms(sourcePath, streamKey) : [];
     const matchTerms = Array.isArray(input.matchTerms)
       ? input.matchTerms.map((item) => String(item).trim()).filter(Boolean)
       : current
         ? parseJson(current.match_terms_json, [])
-        : [];
+        : fallbackMatchTerms;
 
-    if (matchTerms.length === 0) {
+    const finalMatchTerms = matchTerms.length > 0 ? [...new Set(matchTerms)] : fallbackMatchTerms;
+
+    if (finalMatchTerms.length === 0) {
       throw new Error("At least one match term is required.");
     }
 
@@ -1243,9 +1341,11 @@ export class AppDatabase {
         ? String(input.tenantId ?? current?.tenant_id ?? "").trim()
         : (actor?.tenantId ?? current?.tenant_id ?? null),
       serverId: String(input.serverId ?? current?.server_id ?? "").trim(),
-      label: String(input.label ?? current?.label ?? "").trim(),
-      matchTerms,
-      restartCommand: String(input.restartCommand ?? current?.restart_command ?? "").trim(),
+      label: String(input.label ?? current?.label ?? "").trim() || (sourcePath ? path.basename(sourcePath) : current?.label ?? ""),
+      matchTerms: finalMatchTerms,
+      restartCommand: managedMode
+        ? buildManagedRestartCommand(sourcePath, streamKey)
+        : String(input.restartCommand ?? current?.restart_command ?? "").trim(),
       restartLogPath: String(input.restartLogPath ?? current?.restart_log_path ?? "").trim(),
       cooldownSeconds: Number(input.cooldownSeconds ?? current?.cooldown_seconds ?? 60),
       restartWindowSeconds: Number(input.restartWindowSeconds ?? current?.restart_window_seconds ?? 300),
@@ -1836,5 +1936,9 @@ export class AppDatabase {
     }
 
     return payload;
+  }
+
+  close() {
+    this.db.close();
   }
 }

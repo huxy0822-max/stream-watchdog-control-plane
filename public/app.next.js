@@ -72,6 +72,30 @@ function setView(view, role = "guest") {
   document.body.dataset.role = role;
 }
 
+function authPathMode() {
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (pathname === "/admin" || pathname === "/admin/login") return "admin";
+  if (pathname === "/customer" || pathname === "/customer/login" || pathname === "/login") return "customer";
+  if (pathname === "/redeem" || pathname === "/cdk") return "redeem";
+  if (pathname === "/setup") return "setup";
+  return "landing";
+}
+
+function syncAuthRoute(setupRequired, mode) {
+  const target = setupRequired
+    ? "/setup"
+    : mode === "admin"
+      ? "/admin/login"
+      : mode === "customer"
+        ? "/customer/login"
+        : mode === "redeem"
+          ? "/redeem"
+          : "/";
+  if (window.location.pathname !== target) {
+    window.history.replaceState({}, "", target);
+  }
+}
+
 function showToast(message, isError = false) {
   const toast = qs("#toast");
   toast.textContent = message;
@@ -117,6 +141,31 @@ function textareaLines(form, name) {
 
 function normalizeGroupName(value) {
   return String(value ?? "").trim() || "Default";
+}
+
+function normalizeStreamKey(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^rtmp:\/\/[^/]+\/live2\//i, "")
+    .replace(/^live2\//i, "")
+    .trim();
+}
+
+function normalizeMediaPath(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) return "";
+  return normalized.includes("/") ? normalized : `/root/${normalized}`;
+}
+
+function dedupe(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function buildManagedMatchTerms(sourcePath, streamKey) {
+  return dedupe([
+    normalizeStreamKey(streamKey),
+    normalizeMediaPath(sourcePath)
+  ]);
 }
 
 function formatTime(value) {
@@ -205,6 +254,57 @@ function serverOptions(dashboard, tenantId, selectedServerId = "") {
     .join("");
 }
 
+function buildStreamPayload(form) {
+  const body = serializeForm(form);
+  const sourcePath = normalizeMediaPath(body.sourcePath);
+  const streamKey = normalizeStreamKey(body.streamKey);
+  const manualMatchTerms = textareaLines(form, "matchTerms");
+  const managedMatchTerms = buildManagedMatchTerms(sourcePath, streamKey);
+  const label = String(body.label ?? "").trim() || (sourcePath ? sourcePath.split("/").pop() : "");
+
+  return {
+    ...body,
+    label,
+    sourcePath,
+    streamKey,
+    matchTerms: dedupe([...managedMatchTerms, ...manualMatchTerms]),
+    enabled: checkboxValue(form, "enabled")
+  };
+}
+
+function streamIdentityHtml(stream) {
+  const rows = [];
+  if (stream.sourceFileName || stream.sourcePath) {
+    rows.push(`<div class="subtle meta-mono">文件：${escapeHtml(stream.sourceFileName || stream.sourcePath)}</div>`);
+  }
+  if (stream.streamKey) {
+    rows.push(`<div class="subtle meta-mono">推流码：${escapeHtml(stream.streamKey)}</div>`);
+  }
+  return rows.join("");
+}
+
+async function saveStreamFromForm({ startAfterSave = false } = {}) {
+  const form = qs("#streamForm");
+  const payload = buildStreamPayload(form);
+  const path = state.draft.streamId ? `/api/streams/${encodeURIComponent(state.draft.streamId)}` : "/api/streams";
+  const response = await api(path, {
+    method: state.draft.streamId ? "PUT" : "POST",
+    body: payload
+  });
+
+  const streamId = response.stream?.id ?? state.draft.streamId;
+  resetDrafts("stream");
+  await refreshAdmin();
+
+  if (startAfterSave && streamId) {
+    const result = await api(`/api/streams/${encodeURIComponent(streamId)}/recover`, { method: "POST" });
+    await refreshAdmin();
+    return result.message ?? "直播已启动";
+  }
+
+  return "直播流已保存";
+}
+
 function currentServerTenantId(dashboard, user, current = null) {
   if (user.role !== "super_admin") return user.tenantId;
   return state.draft.serverTenantId || current?.tenantId || dashboard.tenants?.[0]?.id || "";
@@ -238,11 +338,33 @@ function explorerGroupKey(group) {
 }
 
 function renderAuth(setupRequired) {
+  const requestedMode = authPathMode();
+  const mode = setupRequired
+    ? "setup"
+    : ["admin", "customer", "redeem"].includes(requestedMode)
+      ? requestedMode
+      : "landing";
+  const landing = mode === "landing";
+
   setView("auth");
   qs("#authShell").classList.remove("hidden");
   qs("#appShell").classList.add("hidden");
+  syncAuthRoute(setupRequired, mode);
   qs("#setupCard").classList.toggle("hidden", !setupRequired);
   qs("#loginHub").classList.toggle("hidden", setupRequired);
+  qs("#loginHub").dataset.layout = landing ? "grid" : "single";
+
+  document.querySelectorAll("[data-auth-card]").forEach((card) => {
+    const cardMode = card.dataset.authCard;
+    const visible = !setupRequired && (landing || cardMode === mode);
+    const form = card.querySelector(".auth-form");
+    const entryActions = card.querySelector(".auth-entry-actions");
+    const routeActions = card.querySelector(".auth-route-actions");
+    card.classList.toggle("hidden", !visible);
+    form?.classList.toggle("hidden", landing || cardMode !== mode);
+    entryActions?.classList.toggle("hidden", !landing);
+    routeActions?.classList.toggle("hidden", landing || cardMode !== mode);
+  });
 }
 
 function renderWorkspaceSnapshot(dashboard, user) {
@@ -502,6 +624,8 @@ function renderStreamForm(dashboard, user) {
     ${workspaceField}
     <label><span>所属服务器</span><select name="serverId"><option value="">请选择服务器</option>${serverOptions(dashboard, tenantId, selectedServerId)}</select></label>
     <label><span>直播流名称</span><input name="label" value="${escapeHtml(current?.label ?? "")}" /></label>
+    <label><span>媒体文件名 / 路径</span><input name="sourcePath" value="${escapeHtml(current?.sourcePath ?? "")}" placeholder="/root/lbo2.mp4 或 lbo2.mp4" /></label>
+    <label><span>YouTube 推流码</span><input name="streamKey" value="${escapeHtml(current?.streamKey ?? "")}" placeholder="r6ab-8cc4-g8sg-jduw-a1qm" /></label>
     <label><span>匹配关键字</span><textarea name="matchTerms">${escapeHtml((current?.matchTerms ?? []).join("\n"))}</textarea></label>
     <label><span>重启命令</span><textarea name="restartCommand">${escapeHtml(current?.restartCommand ?? "")}</textarea></label>
     <label><span>重启日志路径</span><input name="restartLogPath" value="${escapeHtml(current?.restartLogPath ?? "")}" /></label>
@@ -577,6 +701,7 @@ function renderProblemLists(dashboard) {
         <div class="status-pill ${statusClass(stream.status)}">${escapeHtml(statusLabel(stream.status))}</div>
         <div class="title">${escapeHtml(stream.label)}</div>
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")}</div>
+        ${streamIdentityHtml(stream)}
         <div class="subtle">${escapeHtml(stream.lastError ?? "需要优先恢复")}</div>
         <div class="card-actions">
           <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">立即恢复</button>
@@ -620,6 +745,7 @@ function renderStreamViews(dashboard) {
         <div class="status-pill ${statusClass(stream.status)}">${escapeHtml(statusLabel(stream.status))}</div>
         <div class="title">${escapeHtml(stream.label)}</div>
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")} · 最近发现 ${escapeHtml(formatTime(stream.lastSeenAt))}</div>
+        ${streamIdentityHtml(stream)}
         <div class="card-actions">
           <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
           <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
@@ -636,6 +762,7 @@ function renderStreamViews(dashboard) {
         <div class="title">${escapeHtml(stream.label)}</div>
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")}</div>
         <div class="subtle">最后发现：${escapeHtml(formatTime(stream.lastSeenAt))}</div>
+        ${streamIdentityHtml(stream)}
         <div class="card-actions">
           <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
           <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
@@ -765,6 +892,7 @@ function renderGroupExplorer(dashboard) {
                               <div class="status-pill ${statusClass(stream.status)}">${escapeHtml(statusLabel(stream.status))}</div>
                               <div class="title">${escapeHtml(stream.label)}</div>
                               <div class="subtle">最后发现 ${escapeHtml(formatTime(stream.lastSeenAt))}</div>
+                              ${streamIdentityHtml(stream)}
                             </div>
                             <div class="card-actions">
                               <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
@@ -1176,12 +1304,10 @@ function bindEvents() {
         return;
       }
       if (target.id === "saveStreamButton") {
-        const form = qs("#streamForm");
-        const path = state.draft.streamId ? `/api/streams/${encodeURIComponent(state.draft.streamId)}` : "/api/streams";
-        await api(path, { method: state.draft.streamId ? "PUT" : "POST", body: { ...serializeForm(form), enabled: checkboxValue(form, "enabled"), matchTerms: textareaLines(form, "matchTerms") } });
-        resetDrafts("stream");
-        await refreshAdmin();
-        return showToast("直播流已保存");
+        return showToast(await saveStreamFromForm());
+      }
+      if (target.id === "saveAndStartStreamButton") {
+        return showToast(await saveStreamFromForm({ startAfterSave: true }));
       }
       if (target.id === "resetStreamButton") {
         resetDrafts("stream");

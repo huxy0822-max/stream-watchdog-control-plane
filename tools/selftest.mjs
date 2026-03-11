@@ -1,13 +1,33 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { loadConfig } from "../src/config.js";
-import { AppDatabase } from "../src/database.js";
-import { createLogger } from "../src/logger.js";
-import { StreamMonitor } from "../src/monitor.js";
-import { EmailNotifier } from "../src/notifier.js";
-import { RuntimeMetrics } from "../src/runtime-metrics.js";
-import { loadOrCreateMasterKey } from "../src/security.js";
-import { startWebServer } from "../src/web.js";
+const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stream-watchdog-selftest-"));
+process.env.STREAM_WATCH_DB_PATH = path.join(tempRoot, "stream-watchdog.db");
+process.env.STREAM_WATCH_KEY_FILE = path.join(tempRoot, "master.key");
+process.env.STREAM_WATCH_STATE_PATH = path.join(tempRoot, "state.json");
+process.env.STREAM_WATCH_CONFIG = path.join(process.cwd(), "config", "watcher.example.json");
+process.env.STREAM_WATCH_WEB_HOST = "127.0.0.1";
+process.env.STREAM_WATCH_WEB_PORT = String(3300 + Math.floor(Math.random() * 500));
+
+const [
+  { loadConfig },
+  { AppDatabase },
+  { createLogger },
+  { StreamMonitor },
+  { EmailNotifier },
+  { RuntimeMetrics },
+  { loadOrCreateMasterKey },
+  { startWebServer }
+] = await Promise.all([
+  import("../src/config.js"),
+  import("../src/database.js"),
+  import("../src/logger.js"),
+  import("../src/monitor.js"),
+  import("../src/notifier.js"),
+  import("../src/runtime-metrics.js"),
+  import("../src/security.js"),
+  import("../src/web.js")
+]);
 
 const logger = createLogger();
 const config = loadConfig();
@@ -187,8 +207,10 @@ try {
     body: {
       tenantId,
       serverId: serverCreate.server.id,
-      label: "Alpha Stream",
-      matchTerms: ["ffmpeg", "alpha-key"],
+      label: "",
+      sourcePath: "alpha.mp4",
+      streamKey: "alpha-key",
+      matchTerms: [],
       cooldownSeconds: 60,
       restartWindowSeconds: 300,
       maxRestartsInWindow: 3,
@@ -196,6 +218,16 @@ try {
       enabled: false
     }
   });
+
+  if (streamCreate.stream.label !== "alpha.mp4") {
+    throw new Error("Managed stream should derive its label from the media file when left blank.");
+  }
+  if (streamCreate.stream.sourcePath !== "/root/alpha.mp4" || streamCreate.stream.streamKey !== "alpha-key") {
+    throw new Error("Managed stream fields should be exposed in the API response.");
+  }
+  if (!streamCreate.stream.restartCommand.includes("/root/alpha.mp4") || !streamCreate.stream.restartCommand.includes("alpha-key")) {
+    throw new Error("Managed stream should generate a restart command from sourcePath and streamKey.");
+  }
 
   const betaServerCreate = await request("/api/servers", {
     method: "POST",
@@ -217,6 +249,8 @@ try {
       tenantId: tenantBetaId,
       serverId: betaServerCreate.server.id,
       label: "Beta Stream",
+      sourcePath: "beta.mp4",
+      streamKey: "beta-key",
       matchTerms: ["ffmpeg", "beta-key"],
       cooldownSeconds: 60,
       restartWindowSeconds: 300,
@@ -364,4 +398,6 @@ try {
     });
   });
   monitor.stop();
+  database.close();
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 }

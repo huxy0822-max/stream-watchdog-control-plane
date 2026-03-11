@@ -29,6 +29,12 @@ If your provider gave you a CDK:
 
 If your provider created the account for you, just use the customer login form.
 
+Recommended direct routes:
+
+- customer login: `/customer/login`
+- CDK activation: `/redeem`
+- platform admin login: `/admin/login`
+
 ## 3. Plan your groups first
 
 The dashboard is designed for:
@@ -66,6 +72,8 @@ Open **Stream Management** and fill:
 
 - Server
 - Stream label
+- Media filename or absolute media path
+- YouTube stream key
 - Match terms
 - Optional restart command
 - Restart log path
@@ -73,6 +81,26 @@ Open **Stream Management** and fill:
 - Restart window seconds
 - Max restarts inside the window
 - Verification delay
+
+If you provide only:
+
+- a media filename, for example `lbo2.mp4`
+- a YouTube stream key
+
+the dashboard can generate the restart command for you automatically.
+
+If you leave the stream label empty, the filename is used as the default label.
+
+## 5A. One-click start from the web UI
+
+For a new stream, the fastest path is:
+
+1. Select the target server
+2. Enter the media filename or full path
+3. Enter the YouTube stream key
+4. Click **Save and Start**
+
+The platform will create the stream, generate the `ffmpeg` recovery command, store match terms, and trigger immediate start.
 
 ## 6. Match-term rules
 
@@ -86,6 +114,10 @@ Good examples:
 
 ```text
 live2/abcd-efgh-ijkl
+```
+
+```text
+abcd-efgh-ijkl
 ```
 
 Bad examples:
@@ -115,6 +147,12 @@ or
 
 ```bash
 bash /root/restart-room-001.sh
+```
+
+If you use the built-in filename + stream-key mode, the platform generates a command in this pattern automatically:
+
+```bash
+nohup ffmpeg -stream_loop -1 -re -i '/root/file.mp4' -c:v copy -c:a copy -f flv 'rtmp://a.rtmp.youtube.com/live2/your-key' > /dev/null 2>&1 &
 ```
 
 ## 8. How to read the dashboard

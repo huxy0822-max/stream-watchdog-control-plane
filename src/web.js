@@ -87,6 +87,18 @@ function createAsyncHandler(logger, handler) {
   };
 }
 
+function isLoopbackRequest(req) {
+  const candidates = [req.ip, req.socket?.remoteAddress, req.headers["x-forwarded-for"]]
+    .flatMap((value) => String(value ?? "").split(","))
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return candidates.some((value) => (
+    value === "127.0.0.1" ||
+    value === "::1" ||
+    value === "::ffff:127.0.0.1"
+  ));
+}
+
 export function startWebServer({ config, database, monitor, notifier, logger, runtimeMetrics = null }) {
   const app = express();
   const publicDir = path.resolve("./public");
@@ -172,7 +184,12 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
     res.json(payload);
   }
 
-  app.get("/api/setup/status", (_req, res) => {
+  app.get("/api/setup/status", (req, res) => {
+    if (!req.sessionUser && !isLoopbackRequest(req)) {
+      res.status(404).json({ ok: false, message: "Not found." });
+      return;
+    }
+
     res.json({
       ok: true,
       ...database.getSetupStatus()
@@ -312,6 +329,8 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
       tenantId: req.body.tenantId,
       serverId: req.body.serverId,
       label: req.body.label,
+      sourcePath: req.body.sourcePath,
+      streamKey: req.body.streamKey,
       matchTerms: normalizeMatchTerms(req.body.matchTerms),
       restartCommand: req.body.restartCommand,
       restartLogPath: req.body.restartLogPath,
@@ -330,6 +349,8 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
       tenantId: req.body.tenantId,
       serverId: req.body.serverId,
       label: req.body.label,
+      sourcePath: req.body.sourcePath,
+      streamKey: req.body.streamKey,
       matchTerms: normalizeMatchTerms(req.body.matchTerms),
       restartCommand: req.body.restartCommand,
       restartLogPath: req.body.restartLogPath,

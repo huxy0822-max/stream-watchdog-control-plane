@@ -1,0 +1,40 @@
+name: Datadog Synthetics
+
+on:
+  workflow_dispatch:
+    inputs:
+      public_ids:
+        description: "Optional Datadog Synthetic public IDs separated by commas or new lines."
+        required: false
+        type: string
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  synthetics:
+    runs-on: ubuntu-latest
+    env:
+      DD_SYNTHETICS_PUBLIC_IDS: ${{ github.event.inputs.public_ids || vars.DD_SYNTHETICS_PUBLIC_IDS }}
+      DATADOG_SITE: ${{ vars.DATADOG_SITE || 'datadoghq.com' }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Skip when Datadog is not configured
+        if: ${{ secrets.DD_API_KEY == '' || secrets.DD_APP_KEY == '' || env.DD_SYNTHETICS_PUBLIC_IDS == '' }}
+        run: |
+          echo "Datadog Synthetics skipped."
+          echo "Configure DD_API_KEY, DD_APP_KEY, and DD_SYNTHETICS_PUBLIC_IDS to enable this workflow."
+
+      - name: Run Datadog Synthetics
+        if: ${{ secrets.DD_API_KEY != '' && secrets.DD_APP_KEY != '' && env.DD_SYNTHETICS_PUBLIC_IDS != '' }}
+        uses: DataDog/synthetics-ci-github-action@v3.8.2
+        with:
+          api-key: ${{ secrets.DD_API_KEY }}
+          app-key: ${{ secrets.DD_APP_KEY }}
+          public-ids: ${{ env.DD_SYNTHETICS_PUBLIC_IDS }}
+          datadog-site: ${{ env.DATADOG_SITE }}

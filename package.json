@@ -1,9 +1,16 @@
 {
-  "name": "stream-watchdog",
+  "name": "@huxy0822-max/stream-watchdog-control-plane",
   "version": "0.1.0",
   "description": "SSH watchdog for YouTube ffmpeg streams",
   "type": "module",
-  "private": true,
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/huxy0822-max/stream-watchdog-control-plane.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "start": "node src/index.js",
     "once": "node src/index.js --once",
