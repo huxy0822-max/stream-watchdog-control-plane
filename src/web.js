@@ -66,7 +66,7 @@ function statusCodeForError(error) {
     return 409;
   }
 
-  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota/i.test(message)) {
+  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota|must match/i.test(message)) {
     return 400;
   }
 
@@ -87,11 +87,19 @@ function createAsyncHandler(logger, handler) {
   };
 }
 
-export function startWebServer({ config, database, monitor, notifier, logger, runtimeMetrics }) {
+export function startWebServer({ config, database, monitor, notifier, logger, runtimeMetrics = null }) {
   const app = express();
   const publicDir = path.resolve("./public");
   const guidesDir = path.resolve("./docs");
   const loginAttempts = new Map();
+  const metrics = runtimeMetrics ?? {
+    trackRequest(_req, _res, next) {
+      next();
+    },
+    getSnapshot() {
+      return null;
+    }
+  };
 
   function rateLimitKey(req) {
     return req.ip || req.socket.remoteAddress || "unknown";
@@ -123,7 +131,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.use(express.json({ limit: "1mb" }));
   app.use(express.urlencoded({ extended: false }));
-  app.use((req, res, next) => runtimeMetrics.trackRequest(req, res, next));
+  app.use((req, res, next) => metrics.trackRequest(req, res, next));
 
   app.use((req, _res, next) => {
     const cookies = parseCookies(req.headers.cookie ?? "");
@@ -158,7 +166,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
     };
 
     if (req.sessionUser?.role === "super_admin") {
-      payload.dashboard.runtimeMetrics = runtimeMetrics.getSnapshot();
+      payload.dashboard.runtimeMetrics = metrics.getSnapshot();
     }
 
     res.json(payload);

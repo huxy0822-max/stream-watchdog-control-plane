@@ -457,8 +457,8 @@ function renderGroupList(dashboard, user) {
         </div>
         ${group.notes ? `<div class="subtle">${escapeHtml(group.notes)}</div>` : ""}
         <div class="card-actions">
-          <button class="button ghost" data-action="edit-group" data-id="${escapeHtml(group.id)}">编辑</button>
-          <button class="button ghost" data-action="delete-group" data-id="${escapeHtml(group.id)}">删除</button>
+          ${group.id ? `<button class="button ghost" data-action="edit-group" data-id="${escapeHtml(group.id)}">编辑</button>` : ""}
+          ${group.id && group.name !== "Default" ? `<button class="button ghost" data-action="delete-group" data-id="${escapeHtml(group.id)}">删除</button>` : ""}
         </div>
       </article>
     `).join("");
@@ -734,7 +734,7 @@ function renderGroupExplorer(dashboard) {
             </div>
             <div class="card-actions">
               ${state.session.role === "super_admin" ? `<span class="badge">${escapeHtml(tenantNameById(dashboard, group.tenantId) || "默认空间")}</span>` : ""}
-              <button class="button ghost" data-action="edit-group" data-id="${escapeHtml(group.id)}">编辑分组</button>
+              ${group.id ? `<button class="button ghost" data-action="edit-group" data-id="${escapeHtml(group.id)}">编辑分组</button>` : ""}
             </div>
           </div>
           ${state.explorerLevel < 1 ? "" : `

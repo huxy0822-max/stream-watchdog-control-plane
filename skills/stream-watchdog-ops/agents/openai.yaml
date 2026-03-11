@@ -1,0 +1,4 @@
+interface:
+  display_name: "Stream Watchdog Ops"
+  short_description: "Operate Stream Watchdog control planes"
+  default_prompt: "Use $stream-watchdog-ops to inspect, patch, validate, and deploy the Stream Watchdog control plane."

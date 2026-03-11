@@ -86,21 +86,22 @@ On the first visit, create the super-admin account through the bootstrap page.
 - `config/watcher.example.json`: public-safe sample monitoring config
 - `docs/`: user guide, admin guide, multilingual quick-start, deployment notes
 - `deploy/`: service and reverse-proxy examples
+- `skills/stream-watchdog-ops/`: companion OpenClaw skill for operating this control plane
 - `compose.yml` + `Dockerfile`: container deployment
 
 ## Documentation
 
 ### English
 
-- Customer guide: [docs/customer-guide.en.md](/C:/Users/Hu/Documents/Playground/docs/customer-guide.en.md)
-- Super-admin guide: [docs/admin-guide.en.md](/C:/Users/Hu/Documents/Playground/docs/admin-guide.en.md)
-- Deployment modes: [docs/deployment-modes.en.md](/C:/Users/Hu/Documents/Playground/docs/deployment-modes.en.md)
-- Multilingual quick-start: [docs/multilingual-quickstart.md](/C:/Users/Hu/Documents/Playground/docs/multilingual-quickstart.md)
+- Customer guide: [docs/customer-guide.en.md](docs/customer-guide.en.md)
+- Super-admin guide: [docs/admin-guide.en.md](docs/admin-guide.en.md)
+- Deployment modes: [docs/deployment-modes.en.md](docs/deployment-modes.en.md)
+- Multilingual quick-start: [docs/multilingual-quickstart.md](docs/multilingual-quickstart.md)
 
 ### Chinese
 
-- 普通用户教程: [docs/customer-guide.md](/C:/Users/Hu/Documents/Playground/docs/customer-guide.md)
-- 超级管理员教程: [docs/admin-guide.md](/C:/Users/Hu/Documents/Playground/docs/admin-guide.md)
+- 普通用户教程: [docs/customer-guide.md](docs/customer-guide.md)
+- 超级管理员教程: [docs/admin-guide.md](docs/admin-guide.md)
 
 ## Docker deployment
 

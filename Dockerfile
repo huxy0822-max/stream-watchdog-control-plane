@@ -7,12 +7,12 @@ RUN npm ci --omit=dev
 
 COPY src ./src
 COPY public ./public
-COPY config ./config
+COPY config/watcher.example.json ./config/watcher.example.json
 COPY docs ./docs
 COPY .env.example ./
 COPY README.md ./
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/config
 
 ENV NODE_ENV=production
 EXPOSE 3030

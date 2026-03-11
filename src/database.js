@@ -534,7 +534,7 @@ export class AppDatabase {
     return tenant;
   }
 
-  assertTenantQuota(tenantId, fieldName, currentId = null) {
+  assertTenantQuota(tenantId, fieldName, currentId = null, additionalCount = 1) {
     const tenant = this.getTenantRecord(tenantId);
     if (!tenant) {
       throw new Error("Selected tenant does not exist.");
@@ -545,6 +545,7 @@ export class AppDatabase {
       throw new Error("Selected tenant has no available quota.");
     }
 
+    const normalizedAdditionalCount = Math.max(1, Number(additionalCount ?? 1));
     const whereId = currentId ? "AND id <> ?" : "";
     const count = this.db.prepare(`
       SELECT COUNT(*) AS count
@@ -553,7 +554,7 @@ export class AppDatabase {
       ${whereId}
     `).get(...(currentId ? [tenantId, currentId] : [tenantId])).count;
 
-    if (count >= limit) {
+    if (count + normalizedAdditionalCount > limit) {
       const label = fieldName === "max_users"
         ? "users"
         : fieldName === "max_servers"
@@ -889,6 +890,9 @@ export class AppDatabase {
     const current = input.id
       ? this.db.prepare("SELECT * FROM server_configs WHERE id = ?").get(input.id)
       : null;
+    const attachedStreamCount = current
+      ? this.db.prepare("SELECT COUNT(*) AS count FROM stream_configs WHERE server_id = ?").get(current.id).count
+      : 0;
 
     if (current && actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
       throw new Error("You do not have access to this server.");
@@ -925,6 +929,9 @@ export class AppDatabase {
     } else if (payload.tenantId !== current.tenant_id) {
       this.assertTenantIsAvailable(payload.tenantId);
       this.assertTenantQuota(payload.tenantId, "max_servers", current.id);
+      if (attachedStreamCount > 0) {
+        this.assertTenantQuota(payload.tenantId, "max_streams", null, attachedStreamCount);
+      }
     }
 
     this.ensureServerGroupExists(payload.tenantId, payload.groupName);
@@ -1106,6 +1113,22 @@ export class AppDatabase {
             WHERE tenant_id = ? AND group_name = ?
           `).all(current.tenant_id, current.name).map((row) => row.id)
         : [];
+      const affectedStreamCount = affectedServerIds.length > 0
+        ? this.db.prepare(`
+            SELECT COUNT(*) AS count
+            FROM stream_configs
+            WHERE server_id IN (${affectedServerIds.map(() => "?").join(", ")})
+          `).get(...affectedServerIds).count
+        : 0;
+
+      if (current.tenant_id !== payload.tenantId) {
+        if (affectedServerIds.length > 0) {
+          this.assertTenantQuota(payload.tenantId, "max_servers", null, affectedServerIds.length);
+        }
+        if (affectedStreamCount > 0) {
+          this.assertTenantQuota(payload.tenantId, "max_streams", null, affectedStreamCount);
+        }
+      }
 
       this.db.prepare(`
         UPDATE server_groups
@@ -1243,14 +1266,17 @@ export class AppDatabase {
       this.assertTenantQuota(payload.tenantId, "max_streams", current.id);
     }
 
-    const serverExists = this.db.prepare("SELECT id FROM server_configs WHERE id = ?").get(payload.serverId);
-    if (!serverExists) {
+    const serverRecord = this.db.prepare("SELECT id, tenant_id FROM server_configs WHERE id = ?").get(payload.serverId);
+    if (!serverRecord) {
       throw new Error("Selected server does not exist.");
     }
 
+    if (serverRecord.tenant_id !== payload.tenantId) {
+      throw new Error("Stream tenant must match the selected server.");
+    }
+
     if (actor?.role !== "super_admin") {
-      const serverTenant = this.db.prepare("SELECT tenant_id FROM server_configs WHERE id = ?").get(payload.serverId);
-      if (serverTenant?.tenant_id !== actor?.tenantId) {
+      if (serverRecord.tenant_id !== actor?.tenantId) {
         throw new Error("You do not have access to the selected server.");
       }
     }

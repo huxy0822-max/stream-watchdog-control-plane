@@ -114,6 +114,30 @@ try {
   });
   const tenantId = tenantCreate.tenant.id;
 
+  const tenantBetaCreate = await request("/api/tenants", {
+    method: "POST",
+    body: {
+      name: "Tenant Beta",
+      slug: "tenant-beta",
+      maxUsers: 1,
+      maxServers: 2,
+      maxStreams: 1
+    }
+  });
+  const tenantBetaId = tenantBetaCreate.tenant.id;
+
+  const tenantGammaCreate = await request("/api/tenants", {
+    method: "POST",
+    body: {
+      name: "Tenant Gamma",
+      slug: "tenant-gamma",
+      maxUsers: 1,
+      maxServers: 2,
+      maxStreams: 2
+    }
+  });
+  const tenantGammaId = tenantGammaCreate.tenant.id;
+
   await request("/api/groups", {
     method: "POST",
     body: {
@@ -173,6 +197,35 @@ try {
     }
   });
 
+  const betaServerCreate = await request("/api/servers", {
+    method: "POST",
+    body: {
+      tenantId: tenantBetaId,
+      groupName: "Default",
+      label: "Beta Test Server",
+      host: "127.0.0.4",
+      port: 22,
+      username: "root",
+      password: "test-password",
+      enabled: false
+    }
+  });
+
+  await request("/api/streams", {
+    method: "POST",
+    body: {
+      tenantId: tenantBetaId,
+      serverId: betaServerCreate.server.id,
+      label: "Beta Stream",
+      matchTerms: ["ffmpeg", "beta-key"],
+      cooldownSeconds: 60,
+      restartWindowSeconds: 300,
+      maxRestartsInWindow: 3,
+      verifyDelaySeconds: 2,
+      enabled: false
+    }
+  });
+
   await requestExpectFailure("/api/servers", {
     method: "POST",
     status: 409,
@@ -200,6 +253,30 @@ try {
       maxRestartsInWindow: 3,
       verifyDelaySeconds: 2,
       enabled: false
+    }
+  });
+
+  await requestExpectFailure("/api/streams", {
+    method: "POST",
+    status: 400,
+    body: {
+      tenantId: tenantGammaId,
+      serverId: betaServerCreate.server.id,
+      label: "Cross Tenant Stream",
+      matchTerms: ["ffmpeg", "cross-tenant"],
+      cooldownSeconds: 60,
+      restartWindowSeconds: 300,
+      maxRestartsInWindow: 3,
+      verifyDelaySeconds: 2,
+      enabled: false
+    }
+  });
+
+  await requestExpectFailure(`/api/servers/${encodeURIComponent(serverCreate.server.id)}`, {
+    method: "PUT",
+    status: 409,
+    body: {
+      tenantId: tenantBetaId
     }
   });
 
