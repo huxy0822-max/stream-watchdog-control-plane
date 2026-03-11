@@ -2,6 +2,8 @@ const state = {
   session: null,
   dashboard: null,
   page: "overview",
+  lastCreatedRedeemCodes: [],
+  pendingRedeemBatchSize: 0,
   draft: {
     serverId: null,
     streamId: null,
@@ -17,7 +19,8 @@ const state = {
   },
   explorerLevel: 2,
   collapsedGroups: {},
-  collapsedServers: {}
+  collapsedServers: {},
+  collapsedNavGroups: {}
 };
 
 const ROLE_LABELS = {
@@ -75,8 +78,8 @@ function setView(view, role = "guest") {
 
 function authPathMode() {
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
-  if (pathname === "/admin" || pathname === "/admin/login") return "admin";
-  if (pathname === "/customer" || pathname === "/customer/login" || pathname === "/login") return "customer";
+  if (pathname === "/admin" || pathname === "/admin/login" || pathname.startsWith("/admin/")) return "admin";
+  if (pathname === "/customer" || pathname === "/customer/login" || pathname === "/login" || pathname.startsWith("/customer/")) return "customer";
   if (pathname === "/redeem" || pathname === "/cdk") return "redeem";
   if (pathname === "/setup") return "setup";
   return "landing";
@@ -95,6 +98,24 @@ function syncAuthRoute(setupRequired, mode) {
   if (window.location.pathname !== target) {
     window.history.replaceState({}, "", target);
   }
+}
+
+function authCardMap() {
+  return {
+    admin: qs("#adminLoginCard"),
+    customer: qs("#customerLoginCard"),
+    redeem: qs("#redeemCard")
+  };
+}
+
+function authVisibleModes(mode, setupRequired) {
+  if (setupRequired) return [];
+  if (mode === "landing") return ["customer", "redeem"];
+  return [mode];
+}
+
+function navGroupKey(title) {
+  return String(title ?? "").trim().toLowerCase();
 }
 
 const PAGE_META = {
@@ -442,6 +463,29 @@ function explorerGroupKey(group) {
   return `${group.tenantId ?? "global"}:${normalizeGroupName(group.name)}`;
 }
 
+function ensureVisibleAuthCards(mode, setupRequired) {
+  const loginHub = qs("#loginHub");
+  if (!loginHub) return;
+
+  const visibleModes = new Set(authVisibleModes(mode, setupRequired));
+  loginHub.classList.toggle("hidden", setupRequired);
+  loginHub.style.display = setupRequired ? "none" : "grid";
+  loginHub.dataset.layout = mode === "landing" ? "grid" : "single";
+
+  for (const [cardMode, card] of Object.entries(authCardMap())) {
+    if (!card) continue;
+    const visible = visibleModes.has(cardMode);
+    card.classList.toggle("hidden", !visible);
+    card.style.display = visible ? "grid" : "none";
+    const form = card.querySelector(".auth-form");
+    const entryActions = card.querySelector(".auth-entry-actions");
+    const routeActions = card.querySelector(".auth-route-actions");
+    form?.classList.toggle("hidden", mode === "landing" || cardMode !== mode);
+    entryActions?.classList.toggle("hidden", mode !== "landing");
+    routeActions?.classList.toggle("hidden", mode === "landing" || cardMode !== mode);
+  }
+}
+
 function renderAuth(setupRequired) {
   const requestedMode = authPathMode();
   const mode = setupRequired
@@ -456,21 +500,7 @@ function renderAuth(setupRequired) {
   qs("#appShell").classList.add("hidden");
   syncAuthRoute(setupRequired, mode);
   qs("#setupCard").classList.toggle("hidden", !setupRequired);
-  qs("#loginHub").classList.toggle("hidden", setupRequired);
-  qs("#loginHub").dataset.layout = landing ? "grid" : "single";
-
-  document.querySelectorAll("[data-auth-card]").forEach((card) => {
-    const cardMode = card.dataset.authCard;
-    const landingVisible = landing && ["customer", "redeem"].includes(cardMode);
-    const visible = !setupRequired && (landingVisible || cardMode === mode);
-    const form = card.querySelector(".auth-form");
-    const entryActions = card.querySelector(".auth-entry-actions");
-    const routeActions = card.querySelector(".auth-route-actions");
-    card.classList.toggle("hidden", !visible);
-    form?.classList.toggle("hidden", landing || cardMode !== mode);
-    entryActions?.classList.toggle("hidden", !landing);
-    routeActions?.classList.toggle("hidden", landing || cardMode !== mode);
-  });
+  ensureVisibleAuthCards(mode, setupRequired);
 }
 
 function renderSidebarNavigation(user) {
@@ -479,8 +509,11 @@ function renderSidebarNavigation(user) {
   const groups = pageGroupsForRole(user.role);
   nav.innerHTML = groups.map((group) => `
     <section class="nav-group">
-      <div class="nav-group-title">${escapeHtml(group.title)}</div>
-      <div class="nav-group-links">
+      <button class="nav-group-title" type="button" data-action="toggle-nav-group" data-key="${escapeHtml(navGroupKey(group.title))}">
+        <span>${escapeHtml(group.title)}</span>
+        <span class="nav-group-toggle">${state.collapsedNavGroups[navGroupKey(group.title)] ? "＋" : "－"}</span>
+      </button>
+      <div class="nav-group-links ${state.collapsedNavGroups[navGroupKey(group.title)] ? "hidden" : ""}">
         ${group.items.map((item) => `
           <button class="nav-link" type="button" data-page-nav="${escapeHtml(item.page)}" data-active="${item.page === state.page ? "true" : "false"}">
             <span class="nav-link-title">${escapeHtml(item.label)}</span>
@@ -810,7 +843,7 @@ function renderUserForm(dashboard) {
   `;
 }
 
-function renderRedeemCodeForm() {
+function legacyRenderRedeemCodeForm() {
   qs("#redeemCodeForm").innerHTML = `
     <label><span>自定义 CDK</span><input name="code" placeholder="仅单个生成时可填写" /></label>
     <label><span>生成数量</span><input name="quantity" type="number" min="1" max="100" value="1" /></label>
@@ -820,6 +853,74 @@ function renderRedeemCodeForm() {
     <label><span>最大服务器数</span><input name="maxServers" type="number" value="20" /></label>
     <label><span>最大直播流数</span><input name="maxStreams" type="number" value="200" /></label>
     <label><span>备注</span><textarea name="notes"></textarea></label>
+  `;
+}
+
+function renderRedeemCodeForm() {
+  qs("#redeemCodeForm").innerHTML = `
+    <label><span>自定义 CDK</span><input name="code" placeholder="仅单个生成时可填写" /></label>
+    <label><span>生成数量</span><input name="quantity" type="number" min="1" max="100" value="1" /></label>
+    <label><span>套餐名称</span><input name="label" value="VIP Standard" /></label>
+    <label><span>批量备注</span><input name="notes" placeholder="例如：4 月活动批次 / 渠道 A" /></label>
+    <label><span>有效天数</span><input name="durationDays" type="number" value="30" /></label>
+    <label><span>最大账号数</span><input name="maxUsers" type="number" value="1" /></label>
+    <label><span>最大服务器数</span><input name="maxServers" type="number" value="20" /></label>
+    <label><span>最大直播流数</span><input name="maxStreams" type="number" value="200" /></label>
+  `;
+}
+
+function renderRedeemCodeMetrics(dashboard) {
+  const panel = qs("#redeemCodeMetrics");
+  if (!panel) return;
+  const codes = dashboard.redeemCodes ?? [];
+  const counts = {
+    total: codes.length,
+    unused: codes.filter((item) => item.status === "unused").length,
+    redeemed: codes.filter((item) => item.status === "redeemed").length,
+    expired: codes.filter((item) => item.status === "expired").length
+  };
+
+  panel.innerHTML = `
+    <article class="metric compact">
+      <div class="metric-label">CDK 总数</div>
+      <div class="metric-value">${counts.total}</div>
+    </article>
+    <article class="metric compact">
+      <div class="metric-label">未使用</div>
+      <div class="metric-value">${counts.unused}</div>
+    </article>
+    <article class="metric compact">
+      <div class="metric-label">已兑换</div>
+      <div class="metric-value">${counts.redeemed}</div>
+    </article>
+    <article class="metric compact">
+      <div class="metric-label">已过期</div>
+      <div class="metric-value">${counts.expired}</div>
+    </article>
+  `;
+}
+
+function renderRedeemBatchResult() {
+  const panel = qs("#redeemCodeBatchResult");
+  if (!panel) return;
+  if (!state.lastCreatedRedeemCodes.length) {
+    panel.innerHTML = '<div class="empty">当前会话还没有新生成的 CDK 批次。</div>';
+    return;
+  }
+
+  const lines = state.lastCreatedRedeemCodes.map((item) => item.code);
+  panel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <p class="eyebrow">LAST BATCH</p>
+        <h4>最近生成批次</h4>
+      </div>
+      <span class="badge">${lines.length} 个</span>
+    </div>
+    <textarea id="redeemCodeBatchTextarea" class="batch-textarea" readonly>${escapeHtml(lines.join("\n"))}</textarea>
+    <div class="inline-actions">
+      <button id="copyRedeemBatchButton" class="button ghost" type="button">复制这批 CDK</button>
+    </div>
   `;
 }
 
@@ -1070,7 +1171,7 @@ function renderEvents(dashboard) {
     `).join("");
 }
 
-function renderSuperAdmin(dashboard, user) {
+function legacyRenderSuperAdmin(dashboard, user) {
   const visible = user.role === "super_admin";
   if (!visible) return;
 
@@ -1117,6 +1218,57 @@ function renderSuperAdmin(dashboard, user) {
     `).join("");
 }
 
+function renderSuperAdmin(dashboard, user) {
+  const visible = user.role === "super_admin";
+  if (!visible) return;
+
+  renderRuntimeForm(dashboard.runtimeSettings);
+  renderEmailForm(dashboard.emailSettings);
+  renderWorkspaceForm(dashboard);
+  renderUserForm(dashboard);
+  renderRedeemCodeForm();
+  renderRedeemCodeMetrics(dashboard);
+  renderRedeemBatchResult();
+
+  qs("#workspaceList").innerHTML = (dashboard.tenants ?? []).length === 0
+    ? '<div class="empty">当前没有客户空间。</div>'
+    : (dashboard.tenants ?? []).map((item) => `
+      <article class="list-row">
+        <div class="status-pill ${statusClass(item.status)}">${escapeHtml(statusLabel(item.status))}</div>
+        <div class="title">${escapeHtml(item.name)}</div>
+        <div class="subtle">${escapeHtml(item.slug)} · ${daysUntil(item.expiresAt)}</div>
+        ${usageBars(item)}
+        <div class="card-actions">
+          <button class="button ghost" data-action="edit-workspace" data-id="${escapeHtml(item.id)}">编辑</button>
+          <button class="button ghost" data-action="delete-workspace" data-id="${escapeHtml(item.id)}">删除</button>
+        </div>
+      </article>
+    `).join("");
+
+  qs("#userList").innerHTML = (dashboard.users ?? []).length === 0
+    ? '<div class="empty">当前没有客户账号。</div>'
+    : (dashboard.users ?? []).map((item) => `
+      <article class="list-row">
+        <div class="status-pill status-healthy">${escapeHtml(roleLabel(item.role))}</div>
+        <div class="title">${escapeHtml(item.username)}</div>
+        <div class="subtle">${escapeHtml(item.tenantName || "平台管理员")} · 最近登录 ${escapeHtml(formatTime(item.lastLoginAt))}</div>
+        <div class="card-actions"><button class="button ghost" data-action="delete-user" data-id="${escapeHtml(item.id)}">删除</button></div>
+      </article>
+    `).join("");
+
+  qs("#redeemCodeList").innerHTML = (dashboard.redeemCodes ?? []).length === 0
+    ? '<div class="empty">当前没有 CDK。</div>'
+    : (dashboard.redeemCodes ?? []).map((item) => `
+      <article class="list-row">
+        <div class="status-pill ${statusClass(item.status)}">${escapeHtml(statusLabel(item.status))}</div>
+        <div class="title">${escapeHtml(item.code)}</div>
+        <div class="subtle">${escapeHtml(item.label)} · ${item.durationDays} 天 · ${escapeHtml(item.tenantName || "未使用")}</div>
+        <div class="subtle">账号 ${item.maxUsers} / 服务器 ${item.maxServers} / 直播流 ${item.maxStreams}</div>
+        <div class="subtle">${escapeHtml(item.notes || "无批次备注")}</div>
+      </article>
+    `).join("");
+}
+
 function renderDashboard(payload) {
   state.session = payload.user;
   state.dashboard = payload.dashboard;
@@ -1155,7 +1307,13 @@ function renderDashboard(payload) {
 }
 
 async function refreshAdmin() {
-  renderDashboard(await api("/api/admin/state"));
+  const payload = await api("/api/admin/state");
+  renderDashboard(payload);
+  if (state.pendingRedeemBatchSize > 0) {
+    state.lastCreatedRedeemCodes = (payload.dashboard?.redeemCodes ?? []).slice(0, state.pendingRedeemBatchSize);
+    state.pendingRedeemBatchSize = 0;
+    renderRedeemBatchResult();
+  }
 }
 
 function resetDrafts(type = "all") {
@@ -1297,6 +1455,11 @@ async function onActionClick(event) {
     if (action === "toggle-server") {
       state.collapsedServers[id] = !state.collapsedServers[id];
       renderGroupExplorer(state.dashboard);
+      return;
+    }
+    if (action === "toggle-nav-group") {
+      state.collapsedNavGroups[key] = !state.collapsedNavGroups[key];
+      renderSidebarNavigation(state.session);
       return;
     }
     if (action === "set-explorer-level") {
@@ -1530,6 +1693,30 @@ function bindEvents() {
       }
     } catch (error) {
       showToast(error.message, true);
+    }
+  });
+
+  qs("#appShell").addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    if (target.id === "saveRedeemCodeButton") {
+      const quantity = Number(qs('#redeemCodeForm [name="quantity"]')?.value ?? 1);
+      state.pendingRedeemBatchSize = Math.max(1, Math.min(100, Number.isFinite(quantity) ? quantity : 1));
+      return;
+    }
+
+    if (target.id === "copyRedeemBatchButton") {
+      try {
+        const textarea = qs("#redeemCodeBatchTextarea");
+        if (!textarea) {
+          throw new Error("当前没有可复制的 CDK 批次。");
+        }
+        await navigator.clipboard.writeText(textarea.value);
+        showToast("最近生成的 CDK 已复制");
+      } catch (error) {
+        showToast(error.message, true);
+      }
     }
   });
 

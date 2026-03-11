@@ -17,10 +17,11 @@ This repository is now structured as an English-first project with a browser das
 - One-click SSH discovery/import of currently running YouTube `ffmpeg` streams
 - Customer workspaces, customer users, and CDK-based activation
 - Batch CDK generation for repeatable service packages
+- CDK CRM page with quick metrics and latest-batch copy panel
 - SQLite-backed state instead of local-only JSON scripts
 - Built-in email notification settings
 - Super-admin infrastructure panel showing host resources and application resource usage
-- CRM-style sidebar navigation with dedicated pages per module
+- CRM-style collapsible sidebar navigation with dedicated pages per module
 - Docker deployment support
 
 ## Product positioning
@@ -156,10 +157,11 @@ Implemented now:
 - SSH monitoring and automatic restart logic
 - workspace/user/CDK control plane
 - batch CDK generation
+- CDK summary cards and latest-batch copy panel
 - SSH live-stream discovery/import from remote servers
 - group management and collapsible hierarchy explorer
 - infrastructure metrics for super admin
-- browser dashboard with customer/admin separation
+- browser dashboard with customer/admin separation and direct-route-only admin entry
 - CRM-style sidebar navigation and dedicated module pages
 
 Planned next:

@@ -26,6 +26,7 @@ The super-admin dashboard can manage:
 - control-plane host and application resource usage
 - separate login portals and customer activation flow
 - CRM-style sidebar pages for each operational module
+- collapsible CRM-style navigation groups in the left sidebar
 
 Customer users cannot see those platform-wide controls.
 
@@ -85,6 +86,12 @@ Recommended naming pattern:
 - `VIP-90D-20S-300L`
 
 For standardized service sales, use batch generation and create several CDKs for the same package in one operation.
+
+The CDK page now also shows:
+
+- total / unused / redeemed / expired counts
+- the latest generated batch in a copy-ready panel
+- limits per code directly in the list
 
 ## 6. Train customers to use groups
 

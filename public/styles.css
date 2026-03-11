@@ -239,15 +239,29 @@ body[data-role="customer"] {
 }
 
 .nav-group-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--muted);
   font-size: 12px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
 }
 
 .nav-group-links {
   display: grid;
   gap: 8px;
+}
+
+.nav-group-toggle {
+  font-size: 16px;
+  line-height: 1;
 }
 
 .nav-link {
@@ -387,9 +401,18 @@ body[data-role="customer"] {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.metrics.compact-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
 .metric {
   position: relative;
   overflow: hidden;
+}
+
+.metric.compact {
+  min-height: 0;
+  padding: 18px;
 }
 
 .metric::after {
@@ -414,6 +437,11 @@ body[data-role="customer"] {
   letter-spacing: -0.05em;
 }
 
+.metric.compact .metric-value {
+  margin-top: 8px;
+  font-size: 28px;
+}
+
 .layout-grid {
   grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
 }
@@ -434,6 +462,12 @@ body[data-role="customer"] {
   padding: 18px;
   background: var(--panel-strong);
   box-shadow: none;
+}
+
+.batch-textarea {
+  min-height: 180px;
+  font-family: "Consolas", "SFMono-Regular", "Courier New", monospace;
+  white-space: pre;
 }
 
 .panel-header,

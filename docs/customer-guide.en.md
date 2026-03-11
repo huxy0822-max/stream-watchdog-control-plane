@@ -178,6 +178,8 @@ Prioritize these areas in order:
 
 Do not use the event feed as your main operational view.
 
+Use the left sidebar as your primary navigation. Each major area now has its own dedicated page instead of placing everything into one long screen.
+
 ## 9. Common issues
 
 ### Server shows offline
