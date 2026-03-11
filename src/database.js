@@ -52,6 +52,13 @@ function normalizeTenantSlug(value, fallback = "") {
     .replace(/^-+|-+$/g, "");
 }
 
+function resolveTenantSlug(value, fallback = "", existing = "") {
+  return normalizeTenantSlug(value)
+    || normalizeTenantSlug(existing)
+    || normalizeTenantSlug("", fallback)
+    || createId("workspace").replace(/_/g, "-");
+}
+
 function normalizeStreamKey(value) {
   return String(value ?? "")
     .trim()
@@ -614,14 +621,14 @@ export class AppDatabase {
   assertUsernameAvailable(username, currentUserId = null) {
     const normalizedUsername = String(username ?? "").trim();
     if (!normalizedUsername) {
-      throw new Error("Username is required.");
+      throw new Error("请输入账号。");
     }
 
     const duplicate = currentUserId
       ? this.db.prepare("SELECT id FROM app_users WHERE username = ? AND id <> ?").get(normalizedUsername, currentUserId)
       : this.db.prepare("SELECT id FROM app_users WHERE username = ?").get(normalizedUsername);
     if (duplicate) {
-      throw new Error("Username already exists.");
+      throw new Error("该账号已存在。");
     }
 
     return normalizedUsername;
@@ -630,14 +637,14 @@ export class AppDatabase {
   assertTenantSlugAvailable(slug, currentTenantId = null) {
     const normalizedSlug = normalizeTenantSlug(slug);
     if (!normalizedSlug) {
-      throw new Error("Tenant slug is required.");
+      throw new Error("请输入客户空间标识。");
     }
 
     const duplicate = currentTenantId
       ? this.db.prepare("SELECT id FROM tenants WHERE slug = ? AND id <> ?").get(normalizedSlug, currentTenantId)
       : this.db.prepare("SELECT id FROM tenants WHERE slug = ?").get(normalizedSlug);
     if (duplicate) {
-      throw new Error("Workspace slug already exists.");
+      throw new Error("该客户空间标识已存在。");
     }
 
     return normalizedSlug;
@@ -646,15 +653,15 @@ export class AppDatabase {
   assertTenantIsAvailable(tenantId) {
     const tenant = this.getTenantRecord(tenantId);
     if (!tenant) {
-      throw new Error("Selected tenant does not exist.");
+      throw new Error("所选客户空间不存在。");
     }
 
     if (tenant.status !== "active") {
-      throw new Error("Selected tenant is not active.");
+      throw new Error("所选客户空间未启用。");
     }
 
     if (isExpired(tenant.expires_at)) {
-      throw new Error("Selected tenant has expired.");
+      throw new Error("所选客户空间已过期。");
     }
 
     return tenant;
@@ -663,12 +670,12 @@ export class AppDatabase {
   assertTenantQuota(tenantId, fieldName, currentId = null, additionalCount = 1) {
     const tenant = this.getTenantRecord(tenantId);
     if (!tenant) {
-      throw new Error("Selected tenant does not exist.");
+      throw new Error("所选客户空间不存在。");
     }
 
     const limit = Number(tenant[fieldName] ?? 0);
     if (limit <= 0) {
-      throw new Error("Selected tenant has no available quota.");
+      throw new Error("所选客户空间没有可用配额。");
     }
 
     const normalizedAdditionalCount = Math.max(1, Number(additionalCount ?? 1));
@@ -686,7 +693,7 @@ export class AppDatabase {
         : fieldName === "max_servers"
           ? "servers"
           : "streams";
-      throw new Error(`Tenant quota reached for ${label}.`);
+      throw new Error(`客户空间的${label === "users" ? "账号" : label === "servers" ? "服务器" : "直播流"}配额已达上限。`);
     }
 
     return tenant;
@@ -748,12 +755,12 @@ export class AppDatabase {
   bootstrapUser(username, password) {
     const existing = this.db.prepare("SELECT COUNT(*) AS count FROM app_users").get().count;
     if (existing > 0) {
-      throw new Error("The system is already initialized.");
+      throw new Error("系统已经初始化过了。");
     }
 
     const normalizedUsername = this.assertUsernameAvailable(username);
     if (!normalizedUsername || !password || String(password).length < 8) {
-      throw new Error("Username is required and password must be at least 8 characters.");
+      throw new Error("请输入账号，且密码长度不能少于 8 位。");
     }
 
     const now = nowIso();
@@ -866,11 +873,11 @@ export class AppDatabase {
   changePassword(userId, currentPassword, nextPassword) {
     const row = this.db.prepare("SELECT password_hash FROM app_users WHERE id = ?").get(userId);
     if (!row || !verifyPassword(currentPassword, row.password_hash)) {
-      throw new Error("Current password is incorrect.");
+      throw new Error("当前密码不正确。");
     }
 
     if (!nextPassword || String(nextPassword).length < 8) {
-      throw new Error("New password must be at least 8 characters.");
+      throw new Error("新密码长度不能少于 8 位。");
     }
 
     this.db.prepare("UPDATE app_users SET password_hash = ?, updated_at = ? WHERE id = ?")
@@ -1021,7 +1028,7 @@ export class AppDatabase {
       : 0;
 
     if (current && actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this server.");
+      throw new Error("你没有权限访问这台服务器。");
     }
 
     const nextPassword = Object.prototype.hasOwnProperty.call(input, "password")
@@ -1046,7 +1053,7 @@ export class AppDatabase {
     };
 
     if (!payload.tenantId || !payload.label || !payload.host || !payload.username) {
-      throw new Error("Server label, host, and username are required.");
+      throw new Error("请输入服务器名称、主机地址和登录账号。");
     }
 
     if (!current) {
@@ -1129,7 +1136,7 @@ export class AppDatabase {
     }
 
     if (actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this server.");
+      throw new Error("你没有权限访问这台服务器。");
     }
 
     this.db.prepare("DELETE FROM server_configs WHERE id = ?").run(serverId);
@@ -1204,7 +1211,7 @@ export class AppDatabase {
       : null;
 
     if (current && actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this group.");
+      throw new Error("你没有权限访问这个分组。");
     }
 
     const payload = {
@@ -1217,7 +1224,7 @@ export class AppDatabase {
     };
 
     if (!payload.tenantId || !payload.name) {
-      throw new Error("Group name is required.");
+      throw new Error("请输入分组名称。");
     }
 
     this.assertTenantIsAvailable(payload.tenantId);
@@ -1228,7 +1235,7 @@ export class AppDatabase {
       WHERE tenant_id = ? AND name = ? AND id <> ?
     `).get(payload.tenantId, payload.name, payload.id);
     if (duplicate) {
-      throw new Error("A group with the same name already exists.");
+      throw new Error("已存在同名分组。");
     }
 
     if (current) {
@@ -1296,11 +1303,11 @@ export class AppDatabase {
     }
 
     if (actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this group.");
+      throw new Error("你没有权限访问这个分组。");
     }
 
     if (current.name === "Default") {
-      throw new Error("The Default group cannot be deleted.");
+      throw new Error("默认分组不能删除。");
     }
 
     this.ensureServerGroupExists(current.tenant_id, "Default");
@@ -1357,7 +1364,7 @@ export class AppDatabase {
       : null;
 
     if (current && actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this stream.");
+      throw new Error("你没有权限访问这路直播流。");
     }
 
     const currentManaged = current
@@ -1374,7 +1381,7 @@ export class AppDatabase {
     const managedMode = Boolean(sourcePath || streamKey);
 
     if (managedMode && (!sourcePath || !streamKey)) {
-      throw new Error("Media file and stream key are both required.");
+      throw new Error("媒体文件和推流码都必须填写。");
     }
 
     const fallbackMatchTerms = managedMode ? buildManagedMatchTerms(sourcePath, streamKey) : [];
@@ -1387,7 +1394,7 @@ export class AppDatabase {
     const finalMatchTerms = matchTerms.length > 0 ? [...new Set(matchTerms)] : fallbackMatchTerms;
 
     if (finalMatchTerms.length === 0) {
-      throw new Error("At least one match term is required.");
+      throw new Error("至少需要填写一个匹配关键词。");
     }
 
     const payload = {
@@ -1410,7 +1417,7 @@ export class AppDatabase {
     };
 
     if (!payload.tenantId || !payload.serverId || !payload.label) {
-      throw new Error("Stream label and server are required.");
+      throw new Error("请输入直播流名称并选择服务器。");
     }
 
     if (!current) {
@@ -1423,16 +1430,16 @@ export class AppDatabase {
 
     const serverRecord = this.db.prepare("SELECT id, tenant_id FROM server_configs WHERE id = ?").get(payload.serverId);
     if (!serverRecord) {
-      throw new Error("Selected server does not exist.");
+      throw new Error("所选服务器不存在。");
     }
 
     if (serverRecord.tenant_id !== payload.tenantId) {
-      throw new Error("Stream tenant must match the selected server.");
+      throw new Error("直播流所属客户空间必须与所选服务器一致。");
     }
 
     if (actor?.role !== "super_admin") {
       if (serverRecord.tenant_id !== actor?.tenantId) {
-        throw new Error("You do not have access to the selected server.");
+        throw new Error("你没有权限访问所选服务器。");
       }
     }
 
@@ -1503,7 +1510,7 @@ export class AppDatabase {
     }
 
     if (actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
-      throw new Error("You do not have access to this stream.");
+      throw new Error("你没有权限访问这路直播流。");
     }
 
     this.db.prepare("DELETE FROM stream_configs WHERE id = ?").run(streamId);
@@ -1585,7 +1592,7 @@ export class AppDatabase {
     const payload = {
       id: current?.id ?? createId("tenant"),
       name: String(input.name ?? current?.name ?? "").trim(),
-      slug: normalizeTenantSlug(input.slug ?? current?.slug ?? "", input.name ?? current?.name ?? ""),
+      slug: resolveTenantSlug(input.slug, input.name ?? current?.name ?? "", current?.slug ?? ""),
       status: String(input.status ?? current?.status ?? "active").trim() || "active",
       expiresAt: String(input.expiresAt ?? current?.expires_at ?? "").trim() || null,
       maxUsers: Number(input.maxUsers ?? current?.max_users ?? 1),
@@ -1595,7 +1602,7 @@ export class AppDatabase {
     };
 
     if (!payload.name || !payload.slug) {
-      throw new Error("Tenant name and slug are required.");
+      throw new Error("客户空间名称和标识都必须填写。");
     }
 
     this.assertTenantSlugAvailable(payload.slug, current?.id ?? null);
@@ -1681,7 +1688,7 @@ export class AppDatabase {
     };
 
     if (!payload.username || payload.password.length < 8) {
-      throw new Error("Username is required and password must be at least 8 characters.");
+      throw new Error("请输入账号，且密码长度不能少于 8 位。");
     }
 
     if (payload.role !== "super_admin") {
@@ -1737,7 +1744,7 @@ export class AppDatabase {
     const quantity = Math.max(1, Math.min(100, Number(input.quantity ?? 1)));
     const customCode = normalizeRedeemCodeValue(input.code);
     if (quantity > 1 && customCode) {
-      throw new Error("Custom code can only be used when generating one CDK at a time.");
+      throw new Error("自定义 CDK 只能在单个生成时使用。");
     }
 
     const label = String(input.label ?? "Standard Plan").trim() || "Standard Plan";
@@ -1770,11 +1777,11 @@ export class AppDatabase {
       }
 
       if (code.length < 8) {
-        throw new Error("Redeem code must be at least 8 letters or numbers.");
+        throw new Error("CDK 至少需要 8 位字母或数字。");
       }
 
       if (this.db.prepare("SELECT 1 FROM redeem_codes WHERE code = ?").get(code)) {
-        throw new Error(`Redeem code ${code} already exists.`);
+        throw new Error(`CDK ${code} 已存在。`);
       }
 
       insert.run(
@@ -1804,10 +1811,10 @@ export class AppDatabase {
     const username = this.assertUsernameAvailable(input.username);
     const password = String(input.password ?? "").trim();
     const tenantName = String(input.tenantName ?? "").trim();
-    const tenantSlug = this.assertTenantSlugAvailable(input.tenantSlug ?? tenantName);
+    const tenantSlug = this.assertTenantSlugAvailable(resolveTenantSlug(input.tenantSlug, tenantName));
 
     if (!tenantName || password.length < 8) {
-      throw new Error("Workspace name, username, and a password of at least 8 characters are required.");
+      throw new Error("客户空间名称、登录账号和不少于 8 位的密码都必须填写。");
     }
 
     const now = nowIso();
@@ -1860,15 +1867,15 @@ export class AppDatabase {
     const code = String(input.code ?? "").trim().toUpperCase();
     const row = this.db.prepare("SELECT * FROM redeem_codes WHERE code = ?").get(code);
     if (!row || row.status !== "unused") {
-      throw new Error("Redeem code is invalid or already used.");
+      throw new Error("兑换码无效或已经被使用。");
     }
 
     const username = this.assertUsernameAvailable(input.username);
     const password = String(input.password ?? "").trim();
     const tenantName = String(input.tenantName ?? "").trim();
-    const tenantSlug = this.assertTenantSlugAvailable(input.tenantSlug ?? tenantName);
+    const tenantSlug = this.assertTenantSlugAvailable(resolveTenantSlug(input.tenantSlug, tenantName));
     if (!username || password.length < 8 || !tenantName || !tenantSlug) {
-      throw new Error("Tenant name, username, and a password of at least 8 characters are required.");
+      throw new Error("客户空间名称、登录账号和不少于 8 位的密码都必须填写。");
     }
 
     const now = new Date();

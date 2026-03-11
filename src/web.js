@@ -54,19 +54,19 @@ function normalizeRecipients(value) {
 
 function statusCodeForError(error) {
   const message = String(error?.message ?? "");
-  if (/permission required|do not have access/i.test(message)) {
+  if (/permission required|do not have access|权限|required|没有权限|无权访问/i.test(message)) {
     return 403;
   }
 
-  if (/unknown stream|unknown server|not found/i.test(message)) {
+  if (/unknown stream|unknown server|not found|未找到|不存在|未知.*(直播流|服务器)/i.test(message)) {
     return 404;
   }
 
-  if (/already running|already initialized|quota reached|already exists/i.test(message)) {
+  if (/already running|already initialized|quota reached|already exists|已在运行|已经初始化|已达上限|已存在/i.test(message)) {
     return 409;
   }
 
-  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota|must match|can only be used/i.test(message)) {
+  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota|must match|can only be used|必须|无效|错误|不存在|至少|未启用|已过期|已使用|没有可用配额|一致|只能/i.test(message)) {
     return 400;
   }
 
@@ -154,7 +154,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   function requireAuth(req, res, next) {
     if (!req.sessionUser) {
-      res.status(401).json({ ok: false, message: "Authentication required." });
+      res.status(401).json({ ok: false, message: "请先登录。" });
       return;
     }
 
@@ -163,7 +163,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   function requireSuperAdmin(req, res, next) {
     if (!req.sessionUser || req.sessionUser.role !== "super_admin") {
-      res.status(403).json({ ok: false, message: "Super admin permission required." });
+      res.status(403).json({ ok: false, message: "需要超级管理员权限。" });
       return;
     }
 
@@ -196,7 +196,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.get("/api/setup/status", (req, res) => {
     if (!req.sessionUser && !isLoopbackRequest(req)) {
-      res.status(404).json({ ok: false, message: "Not found." });
+      res.status(404).json({ ok: false, message: "未找到该页面。" });
       return;
     }
 
@@ -222,14 +222,14 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.post("/api/auth/login", createAsyncHandler(logger, async (req, res) => {
     if (isRateLimited(req)) {
-      res.status(429).json({ ok: false, message: "Too many failed login attempts. Try again later." });
+      res.status(429).json({ ok: false, message: "登录失败次数过多，请稍后再试。" });
       return;
     }
 
     const user = database.authenticateUser(req.body.username, req.body.password);
     if (!user) {
       recordFailedLogin(req);
-      res.status(401).json({ ok: false, message: "Invalid username or password." });
+      res.status(401).json({ ok: false, message: "账号或密码错误。" });
       return;
     }
 
@@ -245,7 +245,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.post("/api/auth/register", createAsyncHandler(logger, async (req, res) => {
     if (isRateLimited(req)) {
-      res.status(429).json({ ok: false, message: "Too many failed attempts. Try again later." });
+      res.status(429).json({ ok: false, message: "尝试次数过多，请稍后再试。" });
       return;
     }
 
@@ -484,7 +484,7 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
   }));
 
   app.use("/api", (_req, res) => {
-    res.status(404).json({ ok: false, message: "API route not found." });
+    res.status(404).json({ ok: false, message: "接口不存在。" });
   });
 
   app.get("/", (req, res) => {

@@ -284,7 +284,7 @@ async function api(path, options = {}) {
   } catch {}
 
   if (!response.ok) {
-    throw new Error(payload?.message ?? `HTTP ${response.status}`);
+    throw new Error(payload?.message ?? `请求失败（HTTP ${response.status}）`);
   }
 
   return payload;

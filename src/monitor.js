@@ -193,7 +193,7 @@ export class StreamMonitor {
     const allowedIds = new Set(this.database.listServers(false, actor).map((item) => item.id));
     const server = this.database.listServers(true, actor).find((item) => item.id === serverId && allowedIds.has(item.id));
     if (!server) {
-      throw new Error(`Unknown server ${serverId}`);
+      throw new Error(`未找到服务器：${serverId}`);
     }
 
     return server;
@@ -296,7 +296,7 @@ export class StreamMonitor {
       return {
         ok: false,
         skipped: true,
-        message: "A monitoring task is already running."
+        message: "已有监控任务正在运行。"
       };
     }
 
@@ -331,7 +331,7 @@ export class StreamMonitor {
       return {
         ok: true,
         skipped: false,
-        message: "Monitoring cycle completed."
+        message: "巡检已完成。"
       };
     } finally {
       this.isBusy = false;
@@ -350,19 +350,19 @@ export class StreamMonitor {
 
   async recoverStream(streamId, reason = "manual", actor = null) {
     if (this.isBusy) {
-      throw new Error("A monitoring task is already running.");
+      throw new Error("已有监控任务正在运行。");
     }
 
     const monitorConfig = this.database.getMonitorConfig();
     const allowedIds = new Set(this.database.listStreams(false, actor).map((item) => item.id));
     const stream = monitorConfig.streams.find((item) => item.id === streamId && allowedIds.has(item.id));
     if (!stream) {
-      throw new Error(`Unknown stream ${streamId}`);
+      throw new Error(`未找到直播流：${streamId}`);
     }
 
     const server = monitorConfig.servers.find((item) => item.id === stream.serverId);
     if (!server) {
-      throw new Error(`Unknown server ${stream.serverId}`);
+      throw new Error(`未找到服务器：${stream.serverId}`);
     }
 
     this.isBusy = true;
@@ -528,7 +528,7 @@ export class StreamMonitor {
         serverId: server.id,
         secondsSinceRestart
       });
-      return { ok: false, message: "Restart skipped during cooldown.", processes };
+      return { ok: false, message: "当前处于冷却期，已跳过重启。", processes };
     }
 
     if (restartHistory.length >= (stream.maxRestartsInWindow ?? 3)) {
