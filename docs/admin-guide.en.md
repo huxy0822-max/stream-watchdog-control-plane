@@ -51,7 +51,16 @@ Best for repeatable service packages.
 3. The customer activates the workspace themselves.
 4. The customer logs in through the customer portal.
 
-The public root `/` now shows only customer login and CDK activation.
+### Option C: Self-service customer registration
+
+Best when you want leads or trial users to create their own workspace first.
+
+1. Send the customer to `/customer/register`
+2. They create their workspace and admin account themselves
+3. They land directly in their own dashboard
+4. You can later adjust quotas or replace the workspace package from the admin side
+
+The public root `/` now redirects to the customer login route.
 The super-admin entry is intentionally direct-route only: `/admin/login`.
 
 ## 4. Create a workspace

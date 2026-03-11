@@ -14,7 +14,7 @@
         <p class="eyebrow">STREAM CRM</p>
         <h1>直播控制后台</h1>
         <p class="muted">
-          面向多服务器、多直播间和后续商业化扩展的推流监控控制台。主域名仅展示普通用户和 CDK 开通入口，超级管理员只通过专用地址访问。
+          面向多服务器、多直播间和后续商业化扩展的推流监控控制台。主域名默认进入普通用户登录，支持客户自助注册或 CDK 开通；超级管理员仅通过专用地址访问。
         </p>
         <div class="brand-pills">
           <span>异常优先</span>
@@ -67,15 +67,16 @@
 
         <section id="customerLoginCard" class="auth-card auth-card-customer" data-auth-card="customer">
           <p class="eyebrow">CUSTOMER OPS</p>
-          <h2>普通用户 / VIP 用户入口</h2>
-          <p class="muted">用于查看自己分组下的服务器和直播流，执行恢复，维护本空间配置。</p>
+          <h2 id="customerCardTitle">普通用户 / VIP 用户入口</h2>
+          <p id="customerCardDescription" class="muted">用于查看自己分组下的服务器和直播流，执行恢复，维护本空间配置。</p>
           <div class="auth-entry-actions">
             <a class="button secondary auth-entry-link" href="/customer/login">进入用户登录</a>
           </div>
           <div class="auth-route-actions hidden">
-            <a class="button ghost small" href="/">返回首页</a>
+            <a id="customerRoutePrimaryLink" class="button ghost small" href="/customer/register">注册新账号</a>
+            <a class="button ghost small" href="/redeem">使用 CDK 开通</a>
           </div>
-          <form id="customerLoginForm" class="form-grid auth-form">
+          <form id="customerLoginForm" class="form-grid auth-form" data-customer-form="login">
             <label>
               <span>账号</span>
               <input name="username" autocomplete="username" required />
@@ -86,6 +87,32 @@
             </label>
             <button class="button secondary" type="submit">进入运营台</button>
           </form>
+          <form id="customerRegisterForm" class="form-grid auth-form hidden" data-customer-form="register">
+            <label>
+              <span>客户空间名称</span>
+              <input name="tenantName" autocomplete="organization" required />
+            </label>
+            <label>
+              <span>客户空间标识</span>
+              <input name="tenantSlug" placeholder="可选，不填自动生成" />
+            </label>
+            <label>
+              <span>登录账号</span>
+              <input name="username" autocomplete="username" required />
+            </label>
+            <label>
+              <span>登录密码</span>
+              <input name="password" type="password" autocomplete="new-password" minlength="8" required />
+            </label>
+            <label>
+              <span>确认密码</span>
+              <input name="confirmPassword" type="password" autocomplete="new-password" minlength="8" required />
+            </label>
+            <button class="button secondary" type="submit">注册并进入后台</button>
+          </form>
+          <p id="customerAuthHint" class="auth-form-hint hidden">
+            注册完成后会自动创建你的客户空间、默认分组和管理员账号。
+          </p>
         </section>
 
         <section id="redeemCard" class="auth-card auth-card-redeem" data-auth-card="redeem">

@@ -43,6 +43,15 @@ function normalizeGroupName(value) {
   return String(value ?? "").trim() || "Default";
 }
 
+function normalizeTenantSlug(value, fallback = "") {
+  const raw = String(value ?? "").trim() || String(fallback ?? "").trim();
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 function normalizeStreamKey(value) {
   return String(value ?? "")
     .trim()
@@ -81,6 +90,13 @@ function buildManagedMatchTerms(sourcePath, streamKey) {
     normalizeMediaPath(sourcePath)
   ].filter(Boolean))];
 }
+
+const SELF_SERVICE_SIGNUP_DEFAULTS = Object.freeze({
+  maxUsers: 1,
+  maxServers: 3,
+  maxStreams: 20,
+  notes: "Self-service signup"
+});
 
 function unquoteShellToken(value) {
   const text = String(value ?? "").trim();
@@ -595,6 +611,38 @@ export class AppDatabase {
     return this.db.prepare("SELECT * FROM tenants WHERE id = ?").get(tenantId) ?? null;
   }
 
+  assertUsernameAvailable(username, currentUserId = null) {
+    const normalizedUsername = String(username ?? "").trim();
+    if (!normalizedUsername) {
+      throw new Error("Username is required.");
+    }
+
+    const duplicate = currentUserId
+      ? this.db.prepare("SELECT id FROM app_users WHERE username = ? AND id <> ?").get(normalizedUsername, currentUserId)
+      : this.db.prepare("SELECT id FROM app_users WHERE username = ?").get(normalizedUsername);
+    if (duplicate) {
+      throw new Error("Username already exists.");
+    }
+
+    return normalizedUsername;
+  }
+
+  assertTenantSlugAvailable(slug, currentTenantId = null) {
+    const normalizedSlug = normalizeTenantSlug(slug);
+    if (!normalizedSlug) {
+      throw new Error("Tenant slug is required.");
+    }
+
+    const duplicate = currentTenantId
+      ? this.db.prepare("SELECT id FROM tenants WHERE slug = ? AND id <> ?").get(normalizedSlug, currentTenantId)
+      : this.db.prepare("SELECT id FROM tenants WHERE slug = ?").get(normalizedSlug);
+    if (duplicate) {
+      throw new Error("Workspace slug already exists.");
+    }
+
+    return normalizedSlug;
+  }
+
   assertTenantIsAvailable(tenantId) {
     const tenant = this.getTenantRecord(tenantId);
     if (!tenant) {
@@ -703,7 +751,7 @@ export class AppDatabase {
       throw new Error("The system is already initialized.");
     }
 
-    const normalizedUsername = String(username).trim();
+    const normalizedUsername = this.assertUsernameAvailable(username);
     if (!normalizedUsername || !password || String(password).length < 8) {
       throw new Error("Username is required and password must be at least 8 characters.");
     }
@@ -1537,7 +1585,7 @@ export class AppDatabase {
     const payload = {
       id: current?.id ?? createId("tenant"),
       name: String(input.name ?? current?.name ?? "").trim(),
-      slug: String(input.slug ?? current?.slug ?? "").trim(),
+      slug: normalizeTenantSlug(input.slug ?? current?.slug ?? "", input.name ?? current?.name ?? ""),
       status: String(input.status ?? current?.status ?? "active").trim() || "active",
       expiresAt: String(input.expiresAt ?? current?.expires_at ?? "").trim() || null,
       maxUsers: Number(input.maxUsers ?? current?.max_users ?? 1),
@@ -1549,6 +1597,8 @@ export class AppDatabase {
     if (!payload.name || !payload.slug) {
       throw new Error("Tenant name and slug are required.");
     }
+
+    this.assertTenantSlugAvailable(payload.slug, current?.id ?? null);
 
     if (current) {
       this.db.prepare(`
@@ -1620,7 +1670,7 @@ export class AppDatabase {
     const now = nowIso();
     const payload = {
       id: createId("user"),
-      username: String(input.username ?? "").trim(),
+      username: this.assertUsernameAvailable(input.username),
       password: String(input.password ?? "").trim(),
       role: actor?.role === "super_admin"
         ? String(input.role ?? "tenant_admin").trim()
@@ -1750,6 +1800,62 @@ export class AppDatabase {
     return this.createRedeemCodes(input)[0] ?? null;
   }
 
+  registerCustomer(input) {
+    const username = this.assertUsernameAvailable(input.username);
+    const password = String(input.password ?? "").trim();
+    const tenantName = String(input.tenantName ?? "").trim();
+    const tenantSlug = this.assertTenantSlugAvailable(input.tenantSlug ?? tenantName);
+
+    if (!tenantName || password.length < 8) {
+      throw new Error("Workspace name, username, and a password of at least 8 characters are required.");
+    }
+
+    const now = nowIso();
+    const tenantId = createId("tenant");
+    const userId = createId("user");
+
+    this.db.prepare(`
+      INSERT INTO tenants (
+        id, name, slug, status, expires_at, max_users, max_servers, max_streams, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, 'active', NULL, ?, ?, ?, ?, ?, ?)
+    `).run(
+      tenantId,
+      tenantName,
+      tenantSlug,
+      SELF_SERVICE_SIGNUP_DEFAULTS.maxUsers,
+      SELF_SERVICE_SIGNUP_DEFAULTS.maxServers,
+      SELF_SERVICE_SIGNUP_DEFAULTS.maxStreams,
+      SELF_SERVICE_SIGNUP_DEFAULTS.notes,
+      now,
+      now
+    );
+    this.ensureServerGroupExists(tenantId, "Default");
+
+    this.db.prepare(`
+      INSERT INTO app_users (id, username, password_hash, role, tenant_id, created_at, updated_at)
+      VALUES (?, ?, ?, 'tenant_admin', ?, ?, ?)
+    `).run(
+      userId,
+      username,
+      hashPassword(password),
+      tenantId,
+      now,
+      now
+    );
+
+    return {
+      tenantId,
+      userId,
+      user: {
+        id: userId,
+        username,
+        role: "tenant_admin",
+        tenantId
+      },
+      workspace: this.getWorkspaceSummary(tenantId)
+    };
+  }
+
   redeemCode(input) {
     const code = String(input.code ?? "").trim().toUpperCase();
     const row = this.db.prepare("SELECT * FROM redeem_codes WHERE code = ?").get(code);
@@ -1757,10 +1863,10 @@ export class AppDatabase {
       throw new Error("Redeem code is invalid or already used.");
     }
 
-    const username = String(input.username ?? "").trim();
+    const username = this.assertUsernameAvailable(input.username);
     const password = String(input.password ?? "").trim();
     const tenantName = String(input.tenantName ?? "").trim();
-    const tenantSlug = String(input.tenantSlug ?? tenantName).trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+    const tenantSlug = this.assertTenantSlugAvailable(input.tenantSlug ?? tenantName);
     if (!username || password.length < 8 || !tenantName || !tenantSlug) {
       throw new Error("Tenant name, username, and a password of at least 8 characters are required.");
     }

@@ -29,13 +29,22 @@ If your provider gave you a CDK:
 
 If your provider created the account for you, just use the customer login form.
 
+If you are opening your own workspace without a CDK:
+
+1. Open `/customer/register`
+2. Fill in workspace name, workspace slug, username, and password
+3. Submit the form
+4. The system will create your workspace and log you in immediately
+
 Recommended direct routes:
 
 - customer login: `/customer/login`
+- customer self-registration: `/customer/register`
 - CDK activation: `/redeem`
 - platform admin login: `/admin/login`
 
-The public root `/` is intentionally customer-facing and does not show the super-admin entry card.
+The public root `/` redirects to `/customer/login` when you are not signed in.
+If you already have a valid session, `/` sends you directly to your dashboard home.
 
 ## 3. Plan your groups first
 

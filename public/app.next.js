@@ -88,10 +88,11 @@ function setView(view, role = "guest") {
 function authPathMode() {
   const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
   if (pathname === "/admin" || pathname === "/admin/login" || pathname.startsWith("/admin/")) return "admin";
+  if (pathname === "/customer/register") return "register";
   if (pathname === "/customer" || pathname === "/customer/login" || pathname === "/login" || pathname.startsWith("/customer/")) return "customer";
   if (pathname === "/redeem" || pathname === "/cdk") return "redeem";
   if (pathname === "/setup") return "setup";
-  return "landing";
+  return "customer";
 }
 
 function syncAuthRoute(setupRequired, mode) {
@@ -99,11 +100,13 @@ function syncAuthRoute(setupRequired, mode) {
     ? "/setup"
     : mode === "admin"
       ? "/admin/login"
+      : mode === "register"
+        ? "/customer/register"
       : mode === "customer"
         ? "/customer/login"
         : mode === "redeem"
           ? "/redeem"
-          : "/";
+          : "/customer/login";
   if (window.location.pathname !== target) {
     window.history.replaceState({}, "", target);
   }
@@ -119,8 +122,34 @@ function authCardMap() {
 
 function authVisibleModes(mode, setupRequired) {
   if (setupRequired) return [];
-  if (mode === "landing") return ["customer", "redeem"];
+  if (mode === "register") return ["customer"];
   return [mode];
+}
+
+function renderCustomerAuthCard(mode) {
+  const registerMode = mode === "register";
+  const title = qs("#customerCardTitle");
+  const description = qs("#customerCardDescription");
+  const routePrimary = qs("#customerRoutePrimaryLink");
+  const loginForm = qs("#customerLoginForm");
+  const registerForm = qs("#customerRegisterForm");
+  const hint = qs("#customerAuthHint");
+
+  if (title) {
+    title.textContent = registerMode ? "注册普通用户 / VIP 用户" : "普通用户 / VIP 用户入口";
+  }
+  if (description) {
+    description.textContent = registerMode
+      ? "填写空间名称、登录账号和密码后，系统会自动创建你的客户空间并直接进入后台。"
+      : "用于查看自己分组下的服务器和直播流，执行恢复，维护本空间配置。";
+  }
+  if (routePrimary) {
+    routePrimary.href = registerMode ? "/customer/login" : "/customer/register";
+    routePrimary.textContent = registerMode ? "已有账号，返回登录" : "注册新账号";
+  }
+  loginForm?.classList.toggle("hidden", registerMode);
+  registerForm?.classList.toggle("hidden", !registerMode);
+  hint?.classList.toggle("hidden", !registerMode);
 }
 
 function navGroupKey(title) {
@@ -532,30 +561,40 @@ function ensureVisibleAuthCards(mode, setupRequired) {
   const visibleModes = new Set(authVisibleModes(mode, setupRequired));
   loginHub.classList.toggle("hidden", setupRequired);
   loginHub.style.display = setupRequired ? "none" : "grid";
-  loginHub.dataset.layout = mode === "landing" ? "grid" : "single";
+  loginHub.dataset.layout = "single";
+  const activeCardMode = mode === "register" ? "customer" : mode;
 
   for (const [cardMode, card] of Object.entries(authCardMap())) {
     if (!card) continue;
     const visible = visibleModes.has(cardMode);
     card.classList.toggle("hidden", !visible);
     card.style.display = visible ? "grid" : "none";
-    const form = card.querySelector(".auth-form");
+    const forms = [...card.querySelectorAll(".auth-form")];
     const entryActions = card.querySelector(".auth-entry-actions");
     const routeActions = card.querySelector(".auth-route-actions");
-    form?.classList.toggle("hidden", mode === "landing" || cardMode !== mode);
-    entryActions?.classList.toggle("hidden", mode !== "landing");
-    routeActions?.classList.toggle("hidden", mode === "landing" || cardMode !== mode);
+    entryActions?.classList.add("hidden");
+    routeActions?.classList.toggle("hidden", cardMode !== activeCardMode);
+
+    for (const form of forms) {
+      if (cardMode === "customer") {
+        const isRegisterForm = form.dataset.customerForm === "register";
+        form.classList.toggle("hidden", cardMode !== activeCardMode || (mode === "register" ? !isRegisterForm : isRegisterForm));
+      } else {
+        form.classList.toggle("hidden", cardMode !== activeCardMode);
+      }
+    }
   }
+
+  renderCustomerAuthCard(mode);
 }
 
 function renderAuth(setupRequired) {
   const requestedMode = authPathMode();
   const mode = setupRequired
     ? "setup"
-    : ["admin", "customer", "redeem"].includes(requestedMode)
+    : ["admin", "customer", "register", "redeem"].includes(requestedMode)
       ? requestedMode
-      : "landing";
-  const landing = mode === "landing";
+      : "customer";
 
   setView("auth");
   qs("#authShell").classList.remove("hidden");
@@ -1681,6 +1720,17 @@ async function submitLogin(form, mode) {
   await refreshAdmin();
 }
 
+async function submitRegister(form) {
+  const body = serializeForm(form);
+  if (String(body.password ?? "") !== String(body.confirmPassword ?? "")) {
+    throw new Error("两次输入的密码不一致。");
+  }
+
+  delete body.confirmPassword;
+  await api("/api/auth/register", { method: "POST", body });
+  await refreshAdmin();
+}
+
 async function onActionClick(event) {
   const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (!button) return;
@@ -1858,6 +1908,17 @@ function bindEvents() {
     try {
       await submitLogin(event.currentTarget, "customer");
       showToast("已进入直播运营台");
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
+
+  qs("#customerRegisterForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await submitRegister(event.currentTarget);
+      event.currentTarget.reset();
+      showToast("注册成功，已进入直播运营台");
     } catch (error) {
       showToast(error.message, true);
     }

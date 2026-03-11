@@ -170,6 +170,16 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
     next();
   }
 
+  function dashboardPathForUser(user) {
+    if (!user) {
+      return "/customer/login";
+    }
+
+    return user.role === "super_admin"
+      ? "/admin/overview"
+      : "/customer/overview";
+  }
+
   function sendAdminState(req, res) {
     const payload = {
       ok: true,
@@ -231,6 +241,32 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
       authCookieOptions(config, session.maxAgeSeconds)
     );
     res.json({ ok: true, user });
+  }));
+
+  app.post("/api/auth/register", createAsyncHandler(logger, async (req, res) => {
+    if (isRateLimited(req)) {
+      res.status(429).json({ ok: false, message: "Too many failed attempts. Try again later." });
+      return;
+    }
+
+    const result = database.registerCustomer({
+      tenantName: req.body.tenantName,
+      tenantSlug: req.body.tenantSlug,
+      username: req.body.username,
+      password: req.body.password
+    });
+    clearFailedLogins(req);
+    const session = database.createSession(result.user.id);
+    res.cookie(
+      config.web.cookieName,
+      session.token,
+      authCookieOptions(config, session.maxAgeSeconds)
+    );
+    res.json({
+      ok: true,
+      user: result.user,
+      workspace: result.workspace
+    });
   }));
 
   app.post("/api/auth/logout", (req, res) => {
@@ -449,6 +485,47 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.use("/api", (_req, res) => {
     res.status(404).json({ ok: false, message: "API route not found." });
+  });
+
+  app.get("/", (req, res) => {
+    res.redirect(dashboardPathForUser(req.sessionUser));
+  });
+
+  app.get(["/admin", "/admin/login"], (req, res, next) => {
+    if (req.sessionUser) {
+      res.redirect(dashboardPathForUser(req.sessionUser));
+      return;
+    }
+
+    if (req.path === "/admin") {
+      res.redirect("/admin/login");
+      return;
+    }
+
+    next();
+  });
+
+  app.get(["/customer", "/customer/login", "/customer/register", "/login"], (req, res, next) => {
+    if (req.sessionUser) {
+      res.redirect(dashboardPathForUser(req.sessionUser));
+      return;
+    }
+
+    if (req.path === "/customer" || req.path === "/login") {
+      res.redirect("/customer/login");
+      return;
+    }
+
+    next();
+  });
+
+  app.get(["/redeem", "/cdk"], (req, res, next) => {
+    if (req.sessionUser) {
+      res.redirect(dashboardPathForUser(req.sessionUser));
+      return;
+    }
+
+    next();
   });
 
   app.use("/guides", express.static(guidesDir));

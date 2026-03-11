@@ -162,6 +162,22 @@ body[data-role="customer"] {
   flex-wrap: wrap;
 }
 
+.auth-form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-form-hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.auth-form-hint a:hover {
+  text-decoration: underline;
+}
+
 .auth-entry-link {
   width: 100%;
   justify-content: center;

@@ -10,7 +10,7 @@ This repository is now structured as an English-first project with a browser das
 - Multi-server monitoring and automatic restart for `ffmpeg` live streams
 - Issue-first dashboard with separate views for super admin and customer operators
 - Separate auth routes for platform admin, customer ops, and CDK activation
-- Public root only shows customer and CDK access; super admin is direct-route only
+- Public root redirects to the customer portal; super admin is direct-route only
 - Group-based hierarchy: `group -> server -> stream`
 - Customer-facing group operations matrix with issue-first batch recovery
 - Manual recovery, scheduled checks, cooldown and restart-window protection
@@ -91,9 +91,11 @@ After bootstrap, the direct auth routes are:
 
 - `/admin/login`
 - `/customer/login`
+- `/customer/register`
 - `/redeem`
 
-The public root `/` intentionally does not expose the super-admin entry card.
+The public root `/` now redirects unauthenticated visitors to `/customer/login` and redirects authenticated users to their own dashboard home.
+The super-admin entry remains direct-route only.
 
 ## Repository layout
 
