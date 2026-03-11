@@ -1,0 +1,3 @@
+@echo off
+echo %CODEX_SSH_ASKPASS_PASSWORD%
+

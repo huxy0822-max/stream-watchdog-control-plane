@@ -1,0 +1,44 @@
+{
+  "pollIntervalSeconds": 20,
+  "connectionTimeoutSeconds": 15,
+  "verifyDelaySeconds": 8,
+  "stateFile": "./data/state.json",
+  "servers": [
+    {
+      "id": "server-001",
+      "label": "Streaming Server 001",
+      "host": "203.0.113.10",
+      "port": 22,
+      "username": "root",
+      "passwordEnv": "STREAM_WATCH_SERVER_001_PASSWORD"
+    }
+  ],
+  "notifications": {
+    "email": {
+      "enabled": false,
+      "smtpHostEnv": "STREAM_WATCH_SMTP_HOST",
+      "smtpPortEnv": "STREAM_WATCH_SMTP_PORT",
+      "smtpSecureEnv": "STREAM_WATCH_SMTP_SECURE",
+      "smtpUserEnv": "STREAM_WATCH_SMTP_USER",
+      "smtpPassEnv": "STREAM_WATCH_SMTP_PASS",
+      "fromEnv": "STREAM_WATCH_SMTP_FROM",
+      "to": [
+        "ops@example.com"
+      ]
+    }
+  },
+  "streams": [
+    {
+      "id": "stream-001",
+      "label": "YouTube stream /root/video.mp4",
+      "serverId": "server-001",
+      "matchTerms": [
+        "/root/video.mp4"
+      ],
+      "restartLogPath": "/root/stream-watch-stream-001.log",
+      "cooldownSeconds": 60,
+      "restartWindowSeconds": 300,
+      "maxRestartsInWindow": 3
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "stream-watchdog",
+  "version": "0.1.0",
+  "description": "SSH watchdog for YouTube ffmpeg streams",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.js",
+    "once": "node src/index.js --once",
+    "check-config": "node src/index.js --check-config",
+    "selftest": "node tools/selftest.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "nodemailer": "^7.0.2",
+    "ssh2": "^1.15.0"
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Stream Watchdog Control Plane
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/stream-watchdog
+ExecStart=/usr/bin/node /opt/stream-watchdog/src/index.js
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/stream-watchdog/.env
+
+[Install]
+WantedBy=multi-user.target
+

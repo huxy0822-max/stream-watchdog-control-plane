@@ -1,0 +1,8 @@
+node_modules/
+.npm-cache/
+.env
+config/watcher.local.json
+.playwright-cli/
+output/
+data/*
+!data/.gitkeep

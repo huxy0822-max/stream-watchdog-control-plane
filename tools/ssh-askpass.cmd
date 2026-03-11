@@ -1,0 +1,2 @@
+@echo off
+echo %STREAM_WATCH_RACKNERD_ROOT_PASSWORD%

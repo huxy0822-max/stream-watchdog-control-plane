@@ -1,0 +1,87 @@
+# Fill this file and send back the real values.
+# Normal OAuth model:
+# - One Google Cloud project is enough to start.
+# - Each YouTube channel that will be monitored must authorize the app once.
+# CMS/content-owner model:
+# - If you are a YouTube content partner with CMS access, one CMS authorization
+#   can act on behalf of many linked channels.
+
+project:
+  name: youtube-stream-watch
+  timezone: Asia/Shanghai
+  stack_preference: node
+  ui_language: zh-CN
+
+youtube:
+  use_cms_content_owner: false
+  content_owner_id: ""
+  oauth:
+    google_cloud_project_id: ""
+    client_id: ""
+    client_secret: ""
+    redirect_uri: ""
+    publishing_status: production
+    auth_scopes:
+      - https://www.googleapis.com/auth/youtube.readonly
+  channels:
+    - room_id: room-001
+      channel_label: ""
+      auth_mode: oauth_user
+      google_account_email: ""
+      youtube_channel_id: ""
+      live_broadcast_id: ""
+      live_stream_id: ""
+      notes: ""
+
+servers:
+  - server_id: server-001
+    label: ""
+    host: ""
+    port: 22
+    os: ubuntu-22.04
+    username: ""
+    auth_type: ssh_key
+    private_key_path: ""
+    sudo_required: true
+    ffmpeg_run_mode: systemd
+    systemd_service_prefix: stream-
+    agent_install_dir: /opt/stream-watch-agent
+
+rooms:
+  - room_id: room-001
+    server_id: server-001
+    service_name: stream-room-001
+    restart_command: sudo systemctl restart stream-room-001
+    verify_command: systemctl is-active stream-room-001
+    ffmpeg_process_match: ffmpeg
+    ffmpeg_log_path: /var/log/stream-room-001.log
+    input_summary: ""
+    output_summary: "rtmp://a.rtmp.youtube.com/live2/<stream-key>"
+    check_rules:
+      local_process_required: true
+      network_traffic_required: true
+      youtube_api_cross_check: true
+      local_stall_seconds: 45
+      youtube_recheck_seconds: 180
+      max_restarts_in_5_minutes: 3
+      cooldown_seconds: 60
+
+notifications:
+  provider: telegram
+  webhook_or_bot_token: ""
+  chat_id_or_target: ""
+  notify_on_restart: true
+  notify_on_recovery: true
+  notify_on_hard_failure: true
+
+control_plane:
+  deploy_host: ""
+  deploy_os: ubuntu-22.04
+  public_base_url: ""
+  storage: sqlite
+  retention_days: 30
+
+notes:
+  - Provide one real ffmpeg command or one real systemd service file for any room.
+  - Provide one test YouTube channel and one test server first.
+  - If black-screen detection is required, say whether we can pull a low-bitrate preview stream for analysis.
