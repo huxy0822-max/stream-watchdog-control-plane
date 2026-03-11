@@ -13,6 +13,10 @@ const state = {
     streamTenantId: "",
     groupTenantId: ""
   },
+  serverForm: {
+    dirty: false,
+    values: null
+  },
   streamForm: {
     dirty: false,
     values: null
@@ -362,6 +366,73 @@ function normalizeStreamFormValues(values = {}, fallbackEnabled = true) {
     maxRestartsInWindow: String(values.maxRestartsInWindow ?? 3),
     verifyDelaySeconds: String(values.verifyDelaySeconds ?? 8),
     enabled: normalizeBooleanInput(values.enabled, fallbackEnabled)
+  };
+}
+
+function normalizeServerFormValues(values = {}, fallbackEnabled = true) {
+  return {
+    tenantId: String(values.tenantId ?? "").trim(),
+    groupName: String(values.groupName ?? "Default").trim() || "Default",
+    label: String(values.label ?? "").trim(),
+    host: String(values.host ?? "").trim(),
+    port: String(values.port ?? 22),
+    username: String(values.username ?? "root").trim() || "root",
+    password: String(values.password ?? ""),
+    notes: String(values.notes ?? ""),
+    enabled: normalizeBooleanInput(values.enabled, fallbackEnabled)
+  };
+}
+
+function setServerFormState(values = null, dirty = false) {
+  state.serverForm.values = values ? normalizeServerFormValues(values) : null;
+  state.serverForm.dirty = Boolean(values) && dirty;
+}
+
+function clearServerFormState() {
+  state.serverForm.dirty = false;
+  state.serverForm.values = null;
+}
+
+function readServerFormState(form) {
+  if (!form) {
+    return state.serverForm.values ? { ...state.serverForm.values } : null;
+  }
+
+  return normalizeServerFormValues({
+    ...serializeForm(form),
+    enabled: checkboxValue(form, "enabled")
+  });
+}
+
+function serverFormDefaults(dashboard, user, current = null) {
+  const tenantId = currentServerTenantId(dashboard, user, current);
+  return normalizeServerFormValues({
+    tenantId,
+    groupName: current?.groupName ?? "Default",
+    label: current?.label ?? "",
+    host: current?.host ?? "",
+    port: current?.port ?? 22,
+    username: current?.username ?? "root",
+    password: "",
+    notes: current?.notes ?? "",
+    enabled: current ? current.enabled : true
+  }, current ? current.enabled : true);
+}
+
+function resolveServerFormValues(dashboard, user, current = null) {
+  const defaults = serverFormDefaults(dashboard, user, current);
+  const merged = state.serverForm.values
+    ? normalizeServerFormValues({ ...defaults, ...state.serverForm.values }, defaults.enabled)
+    : defaults;
+  const tenantId = user.role === "super_admin"
+    ? (merged.tenantId || defaults.tenantId)
+    : defaults.tenantId;
+  const groupName = normalizeGroupName(merged.groupName || defaults.groupName);
+
+  return {
+    ...merged,
+    tenantId,
+    groupName
   };
 }
 
@@ -989,26 +1060,26 @@ function renderGroupList(dashboard, user) {
 
 function renderServerForm(dashboard, user) {
   const current = dashboard.servers.find((item) => item.id === state.draft.serverId) ?? null;
-  const tenantId = currentServerTenantId(dashboard, user, current);
+  const values = resolveServerFormValues(dashboard, user, current);
   const workspaceField = user.role === "super_admin"
     ? `<label><span>所属客户空间</span><select name="tenantId"><option value="">请选择客户空间</option>${workspaceOptions(dashboard)}</select></label>`
     : "";
 
   qs("#serverForm").innerHTML = `
     ${workspaceField}
-    <label><span>服务器分组</span><select name="groupName">${groupOptions(dashboard, tenantId, current?.groupName ?? "Default")}</select></label>
-    <label><span>服务器名称</span><input name="label" value="${escapeHtml(current?.label ?? "")}" /></label>
-    <label><span>主机地址</span><input name="host" value="${escapeHtml(current?.host ?? "")}" /></label>
-    <label><span>SSH 端口</span><input name="port" type="number" value="${escapeHtml(current?.port ?? 22)}" /></label>
-    <label><span>SSH 用户名</span><input name="username" value="${escapeHtml(current?.username ?? "root")}" /></label>
-    <label><span>SSH 密码</span><input name="password" type="password" placeholder="${current?.hasPassword ? "留空则保持不变" : ""}" /></label>
-    <label><span><input name="enabled" type="checkbox" ${current ? (current.enabled ? "checked" : "") : "checked"} /> 启用服务器</span></label>
-    <label><span>备注</span><textarea name="notes">${escapeHtml(current?.notes ?? "")}</textarea></label>
+    <label><span>服务器分组</span><select name="groupName">${groupOptions(dashboard, values.tenantId, values.groupName)}</select></label>
+    <label><span>服务器名称</span><input name="label" value="${escapeHtml(values.label)}" /></label>
+    <label><span>主机地址</span><input name="host" value="${escapeHtml(values.host)}" /></label>
+    <label><span>SSH 端口</span><input name="port" type="number" value="${escapeHtml(values.port)}" /></label>
+    <label><span>SSH 用户名</span><input name="username" value="${escapeHtml(values.username)}" /></label>
+    <label><span>SSH 密码</span><input name="password" type="password" value="${escapeHtml(values.password)}" placeholder="${current?.hasPassword ? "留空则保持不变" : ""}" /></label>
+    <label><span><input name="enabled" type="checkbox" ${values.enabled ? "checked" : ""} /> 启用服务器</span></label>
+    <label><span>备注</span><textarea name="notes">${escapeHtml(values.notes)}</textarea></label>
   `;
 
   if (user.role === "super_admin") {
     const select = qs('#serverForm [name="tenantId"]');
-    if (select) select.value = tenantId;
+    if (select) select.value = values.tenantId;
   }
 
   const discoverButton = qs("#discoverServerStreamsButton");
@@ -1799,7 +1870,7 @@ function renderSuperAdmin(dashboard, user) {
     `).join("");
 }
 
-function renderDashboard(payload, { preserveStreamForm = false } = {}) {
+function renderDashboard(payload, { preserveStreamForm = false, preserveServerForm = false } = {}) {
   state.session = payload.user;
   state.dashboard = payload.dashboard;
   const isSuper = payload.user.role === "super_admin";
@@ -1824,7 +1895,9 @@ function renderDashboard(payload, { preserveStreamForm = false } = {}) {
   renderRuntimeMetrics(payload.dashboard, payload.user);
   renderGroupForm(payload.dashboard, payload.user);
   renderGroupList(payload.dashboard, payload.user);
-  renderServerForm(payload.dashboard, payload.user);
+  if (!(preserveServerForm && state.page === "servers" && state.serverForm.dirty)) {
+    renderServerForm(payload.dashboard, payload.user);
+  }
   if (!(preserveStreamForm && state.page === "streams" && state.streamForm.dirty)) {
     renderStreamForm(payload.dashboard, payload.user);
   }
@@ -1839,9 +1912,9 @@ function renderDashboard(payload, { preserveStreamForm = false } = {}) {
   applyPageVisibility(payload.user);
 }
 
-async function refreshAdmin({ preserveStreamForm = false } = {}) {
+async function refreshAdmin({ preserveStreamForm = false, preserveServerForm = false } = {}) {
   const payload = await api("/api/admin/state");
-  renderDashboard(payload, { preserveStreamForm });
+  renderDashboard(payload, { preserveStreamForm, preserveServerForm });
   if (state.pendingRedeemBatchSize > 0) {
     state.lastCreatedRedeemCodes = (payload.dashboard?.redeemCodes ?? []).slice(0, state.pendingRedeemBatchSize);
     state.pendingRedeemBatchSize = 0;
@@ -1853,6 +1926,7 @@ function resetDrafts(type = "all") {
   if (type === "all" || type === "server") {
     state.draft.serverId = null;
     state.draft.serverTenantId = "";
+    clearServerFormState();
   }
   if (type === "all" || type === "stream") {
     state.draft.streamId = null;
@@ -1929,6 +2003,7 @@ async function onActionClick(event) {
       if (!server) return;
       state.draft.serverId = id;
       state.draft.serverTenantId = server.tenantId ?? "";
+      setServerFormState(serverFormDefaults(state.dashboard, state.session, server), false);
       state.page = "servers";
       syncAppRoute(state.session.role, state.page);
       renderSidebarNavigation(state.session);
@@ -2203,6 +2278,13 @@ function bindEvents() {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !state.dashboard || !state.session) return;
 
+    if (target.matches('#serverForm input, #serverForm textarea, #serverForm select')) {
+      const form = qs("#serverForm");
+      if (form) {
+        setServerFormState(readServerFormState(form), true);
+      }
+    }
+
     if (target.matches('#streamForm input, #streamForm textarea, #streamForm select')) {
       const form = qs("#streamForm");
       if (form) {
@@ -2211,6 +2293,12 @@ function bindEvents() {
     }
 
     if (target.matches('#serverForm [name="tenantId"]')) {
+      const form = qs("#serverForm");
+      if (form) {
+        const values = readServerFormState(form);
+        values.tenantId = target.value;
+        setServerFormState(values, true);
+      }
       state.draft.serverTenantId = target.value;
       renderServerForm(state.dashboard, state.session);
     }
@@ -2233,6 +2321,12 @@ function bindEvents() {
   document.addEventListener("input", (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
+    if (target.matches('#serverForm input, #serverForm textarea')) {
+      const form = qs("#serverForm");
+      if (!form) return;
+      setServerFormState(readServerFormState(form), true);
+      return;
+    }
     if (!target.matches('#streamForm input, #streamForm textarea')) return;
     const form = qs("#streamForm");
     if (!form) return;
@@ -2396,6 +2490,6 @@ bindEvents();
 initializeSession().catch((error) => showToast(error.message, true));
 setInterval(() => {
   if (state.session) {
-    refreshAdmin({ preserveStreamForm: true }).catch(console.error);
+    refreshAdmin({ preserveStreamForm: true, preserveServerForm: true }).catch(console.error);
   }
 }, 15000);

@@ -13,9 +13,15 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "start:test": "node scripts/run-local-profile.mjs test",
     "once": "node src/index.js --once",
+    "once:test": "node scripts/run-local-profile.mjs test --once",
     "check-config": "node src/index.js --check-config",
-    "selftest": "node tools/selftest.mjs"
+    "check-config:test": "node scripts/run-local-profile.mjs test --check-config",
+    "selftest": "node tools/selftest.mjs",
+    "deploy:prod": "node scripts/deploy-production.mjs",
+    "releases:prod": "node scripts/list-production-releases.mjs",
+    "rollback:prod": "node scripts/rollback-production.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

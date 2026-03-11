@@ -1,8 +1,13 @@
 .env
 .git
 .npm-cache
+.github
+.playwright-cli
 data
-node_modules
 deploy
+node_modules
+output
+scripts
+skills
 tools
 *.log

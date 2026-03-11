@@ -1,6 +1,8 @@
 node_modules/
 .npm-cache/
 .env
+.env.production.local
+.env.test.local
 config/watcher.local.json
 .playwright-cli/
 output/

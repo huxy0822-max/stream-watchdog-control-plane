@@ -79,6 +79,12 @@ npm run check-config
 npm run start
 ```
 
+For local development and unfinished changes, use the isolated test profile instead:
+
+```powershell
+npm run start:test
+```
+
 6. Open:
 
 ```text
@@ -115,6 +121,7 @@ The super-admin entry remains direct-route only.
 - Super-admin guide: [docs/admin-guide.en.md](docs/admin-guide.en.md)
 - Deployment modes: [docs/deployment-modes.en.md](docs/deployment-modes.en.md)
 - Multilingual quick-start: [docs/multilingual-quickstart.md](docs/multilingual-quickstart.md)
+- Release workflow: [docs/release-workflow.en.md](docs/release-workflow.en.md)
 
 ### Chinese
 
