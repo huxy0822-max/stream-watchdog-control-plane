@@ -1326,7 +1326,7 @@ export class AppDatabase {
       FROM stream_configs
       JOIN server_configs ON server_configs.id = stream_configs.server_id
       ${scope.where}
-      ORDER BY stream_configs.created_at ASC
+      ORDER BY stream_configs.created_at DESC
     `).all(...scope.params).map((row) => {
       const discoveredCommand = decryptText(row.discovered_command_enc, this.masterKey) ?? "";
       const managed = parseManagedStreamFields(row.restart_command ?? "", discoveredCommand);

@@ -13,6 +13,10 @@ const state = {
     streamTenantId: "",
     groupTenantId: ""
   },
+  streamForm: {
+    dirty: false,
+    values: null
+  },
   filters: {
     query: "",
     status: "all"
@@ -334,6 +338,104 @@ function buildManagedMatchTerms(sourcePath, streamKey) {
   ]);
 }
 
+function normalizeBooleanInput(value, fallback = true) {
+  if (typeof value === "boolean") return value;
+  if (value === undefined || value === null || value === "") return fallback;
+  const normalized = String(value).trim().toLowerCase();
+  return !["0", "false", "off", "no"].includes(normalized);
+}
+
+function normalizeStreamFormValues(values = {}, fallbackEnabled = true) {
+  return {
+    tenantId: String(values.tenantId ?? "").trim(),
+    serverId: String(values.serverId ?? "").trim(),
+    label: String(values.label ?? "").trim(),
+    sourcePath: String(values.sourcePath ?? "").trim(),
+    streamKey: String(values.streamKey ?? "").trim(),
+    matchTerms: Array.isArray(values.matchTerms)
+      ? values.matchTerms.join("\n")
+      : String(values.matchTerms ?? ""),
+    restartCommand: String(values.restartCommand ?? "").trim(),
+    restartLogPath: String(values.restartLogPath ?? "").trim(),
+    cooldownSeconds: String(values.cooldownSeconds ?? 60),
+    restartWindowSeconds: String(values.restartWindowSeconds ?? 300),
+    maxRestartsInWindow: String(values.maxRestartsInWindow ?? 3),
+    verifyDelaySeconds: String(values.verifyDelaySeconds ?? 8),
+    enabled: normalizeBooleanInput(values.enabled, fallbackEnabled)
+  };
+}
+
+function setStreamFormState(values = null, dirty = false) {
+  state.streamForm.values = values ? normalizeStreamFormValues(values) : null;
+  state.streamForm.dirty = Boolean(values) && dirty;
+}
+
+function clearStreamFormState() {
+  state.streamForm.dirty = false;
+  state.streamForm.values = null;
+}
+
+function readStreamFormState(form) {
+  if (!form) {
+    return state.streamForm.values ? { ...state.streamForm.values } : null;
+  }
+
+  return normalizeStreamFormValues({
+    ...serializeForm(form),
+    enabled: checkboxValue(form, "enabled")
+  });
+}
+
+function streamFormDefaults(dashboard, user, current = null) {
+  const tenantId = currentStreamTenantId(dashboard, user, current);
+  const candidateServers = dashboard.servers.filter((server) => !tenantId || server.tenantId === tenantId);
+  return normalizeStreamFormValues({
+    tenantId,
+    serverId: current?.serverId ?? candidateServers[0]?.id ?? "",
+    label: current?.label ?? "",
+    sourcePath: current?.sourcePath ?? "",
+    streamKey: current?.streamKey ?? "",
+    matchTerms: (current?.matchTerms ?? []).join("\n"),
+    restartCommand: current?.restartCommand ?? "",
+    restartLogPath: current?.restartLogPath ?? "",
+    cooldownSeconds: current?.cooldownSeconds ?? 60,
+    restartWindowSeconds: current?.restartWindowSeconds ?? 300,
+    maxRestartsInWindow: current?.maxRestartsInWindow ?? 3,
+    verifyDelaySeconds: current?.verifyDelaySeconds ?? dashboard.runtimeSettings.defaultVerifyDelaySeconds,
+    enabled: current ? current.enabled : true
+  }, current ? current.enabled : true);
+}
+
+function resolveStreamFormValues(dashboard, user, current = null) {
+  const defaults = streamFormDefaults(dashboard, user, current);
+  const merged = state.streamForm.values
+    ? normalizeStreamFormValues({ ...defaults, ...state.streamForm.values }, defaults.enabled)
+    : defaults;
+  const tenantId = user.role === "super_admin"
+    ? (merged.tenantId || defaults.tenantId)
+    : defaults.tenantId;
+  const candidateServers = dashboard.servers.filter((server) => !tenantId || server.tenantId === tenantId);
+  const selectedServerId = candidateServers.some((server) => server.id === merged.serverId)
+    ? merged.serverId
+    : defaults.serverId && candidateServers.some((server) => server.id === defaults.serverId)
+      ? defaults.serverId
+      : candidateServers[0]?.id ?? "";
+
+  return {
+    ...merged,
+    tenantId,
+    serverId: selectedServerId
+  };
+}
+
+function duplicateStreamValues(stream, dashboard, user) {
+  const values = streamFormDefaults(dashboard, user, stream);
+  return {
+    ...values,
+    label: values.label ? `${values.label} 副本` : ""
+  };
+}
+
 function formatTime(value) {
   return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "暂无";
 }
@@ -449,7 +551,7 @@ function streamIdentityHtml(stream) {
   return rows.join("");
 }
 
-async function saveStreamFromForm({ startAfterSave = false } = {}) {
+async function saveStreamFromFormLegacy({ startAfterSave = false } = {}) {
   const form = qs("#streamForm");
   const payload = buildStreamPayload(form);
   const path = state.draft.streamId ? `/api/streams/${encodeURIComponent(state.draft.streamId)}` : "/api/streams";
@@ -474,6 +576,33 @@ async function saveStreamFromForm({ startAfterSave = false } = {}) {
 function currentServerTenantId(dashboard, user, current = null) {
   if (user.role !== "super_admin") return user.tenantId;
   return state.draft.serverTenantId || current?.tenantId || dashboard.tenants?.[0]?.id || "";
+}
+
+async function saveStreamFromForm({ startAfterSave = false } = {}) {
+  const form = qs("#streamForm");
+  const isEditing = Boolean(state.draft.streamId);
+  const payload = buildStreamPayload(form);
+  const path = state.draft.streamId ? `/api/streams/${encodeURIComponent(state.draft.streamId)}` : "/api/streams";
+  const response = await api(path, {
+    method: state.draft.streamId ? "PUT" : "POST",
+    body: payload
+  });
+
+  const streamId = response.stream?.id ?? state.draft.streamId;
+  resetDrafts("stream");
+  state.filters.query = "";
+  state.filters.status = "all";
+  await refreshAdmin();
+
+  if (startAfterSave && streamId) {
+    const result = await api(`/api/streams/${encodeURIComponent(streamId)}/recover`, { method: "POST" });
+    await refreshAdmin();
+    return result.message ?? (isEditing ? "直播流已更新并已提交开播。" : `已创建并提交开播：${response.stream?.label ?? payload.label}`);
+  }
+
+  return isEditing
+    ? `直播流已更新：${response.stream?.label ?? payload.label}`
+    : `直播流已创建：${response.stream?.label ?? payload.label}`;
 }
 
 function currentStreamTenantId(dashboard, user, current = null) {
@@ -889,7 +1018,7 @@ function renderServerForm(dashboard, user) {
   }
 }
 
-function renderStreamForm(dashboard, user) {
+function renderStreamFormLegacy(dashboard, user) {
   const current = dashboard.streams.find((item) => item.id === state.draft.streamId) ?? null;
   const tenantId = currentStreamTenantId(dashboard, user, current);
   const workspaceField = user.role === "super_admin"
@@ -933,6 +1062,41 @@ function renderWorkspaceForm(dashboard) {
     <label><span>备注</span><textarea name="notes">${escapeHtml(current?.notes ?? "")}</textarea></label>
   `;
   if (current?.status) qs('#workspaceForm [name="status"]').value = current.status;
+}
+
+function renderStreamForm(dashboard, user) {
+  const current = dashboard.streams.find((item) => item.id === state.draft.streamId) ?? null;
+  const values = resolveStreamFormValues(dashboard, user, current);
+  const workspaceField = user.role === "super_admin"
+    ? `<label><span>所属客户空间</span><select name="tenantId"><option value="">请选择客户空间</option>${workspaceOptions(dashboard)}</select></label>`
+    : "";
+
+  qs("#streamForm").innerHTML = `
+    ${workspaceField}
+    <label><span>所属服务器</span><select name="serverId"><option value="">请选择服务器</option>${serverOptions(dashboard, values.tenantId, values.serverId)}</select></label>
+    <label><span>直播流名称</span><input name="label" value="${escapeHtml(values.label)}" /></label>
+    <label><span>媒体文件名 / 路径</span><input name="sourcePath" value="${escapeHtml(values.sourcePath)}" placeholder="/root/lbo2.mp4 或 lbo2.mp4" /></label>
+    <label><span>YouTube 推流码</span><input name="streamKey" value="${escapeHtml(values.streamKey)}" placeholder="r6ab-8cc4-g8sg-jduw-a1qm" /></label>
+    <label><span>匹配关键字</span><textarea name="matchTerms">${escapeHtml(values.matchTerms)}</textarea></label>
+    <label><span>重启命令</span><textarea name="restartCommand">${escapeHtml(values.restartCommand)}</textarea></label>
+    <label><span>重启日志路径</span><input name="restartLogPath" value="${escapeHtml(values.restartLogPath)}" /></label>
+    <label><span>冷却时间（秒）</span><input name="cooldownSeconds" type="number" value="${escapeHtml(values.cooldownSeconds)}" /></label>
+    <label><span>重启窗口（秒）</span><input name="restartWindowSeconds" type="number" value="${escapeHtml(values.restartWindowSeconds)}" /></label>
+    <label><span>窗口内最大重启数</span><input name="maxRestartsInWindow" type="number" value="${escapeHtml(values.maxRestartsInWindow)}" /></label>
+    <label><span>验证延迟（秒）</span><input name="verifyDelaySeconds" type="number" value="${escapeHtml(values.verifyDelaySeconds)}" /></label>
+    <label><span><input name="enabled" type="checkbox" ${values.enabled ? "checked" : ""} /> 启用直播流</span></label>
+  `;
+
+  if (user.role === "super_admin") {
+    const tenantSelect = qs('#streamForm [name="tenantId"]');
+    if (tenantSelect) tenantSelect.value = values.tenantId;
+  }
+
+  const duplicateButton = qs("#duplicateStreamButton");
+  if (duplicateButton) {
+    duplicateButton.classList.toggle("hidden", !current?.id);
+    duplicateButton.dataset.streamId = current?.id ?? "";
+  }
 }
 
 function renderUserForm(dashboard) {
@@ -1097,6 +1261,7 @@ function renderStreamViews(dashboard) {
         <div class="card-actions">
           <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
           <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
+          <button class="button ghost" data-action="duplicate-stream" data-id="${escapeHtml(stream.id)}">复制配置</button>
           <button class="button ghost" data-action="delete-stream" data-id="${escapeHtml(stream.id)}">删除</button>
         </div>
       </article>
@@ -1114,6 +1279,7 @@ function renderStreamViews(dashboard) {
         <div class="card-actions">
           <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
           <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
+          <button class="button ghost" data-action="duplicate-stream" data-id="${escapeHtml(stream.id)}">复制配置</button>
         </div>
       </article>
     `).join("");
@@ -1633,7 +1799,7 @@ function renderSuperAdmin(dashboard, user) {
     `).join("");
 }
 
-function renderDashboard(payload) {
+function renderDashboard(payload, { preserveStreamForm = false } = {}) {
   state.session = payload.user;
   state.dashboard = payload.dashboard;
   const isSuper = payload.user.role === "super_admin";
@@ -1659,7 +1825,9 @@ function renderDashboard(payload) {
   renderGroupForm(payload.dashboard, payload.user);
   renderGroupList(payload.dashboard, payload.user);
   renderServerForm(payload.dashboard, payload.user);
-  renderStreamForm(payload.dashboard, payload.user);
+  if (!(preserveStreamForm && state.page === "streams" && state.streamForm.dirty)) {
+    renderStreamForm(payload.dashboard, payload.user);
+  }
   renderProblemLists(payload.dashboard);
   renderServerList(payload.dashboard);
   renderStreamViews(payload.dashboard);
@@ -1671,9 +1839,9 @@ function renderDashboard(payload) {
   applyPageVisibility(payload.user);
 }
 
-async function refreshAdmin() {
+async function refreshAdmin({ preserveStreamForm = false } = {}) {
   const payload = await api("/api/admin/state");
-  renderDashboard(payload);
+  renderDashboard(payload, { preserveStreamForm });
   if (state.pendingRedeemBatchSize > 0) {
     state.lastCreatedRedeemCodes = (payload.dashboard?.redeemCodes ?? []).slice(0, state.pendingRedeemBatchSize);
     state.pendingRedeemBatchSize = 0;
@@ -1689,6 +1857,7 @@ function resetDrafts(type = "all") {
   if (type === "all" || type === "stream") {
     state.draft.streamId = null;
     state.draft.streamTenantId = "";
+    clearStreamFormState();
   }
   if (type === "all" || type === "workspace") {
     state.draft.workspaceId = null;
@@ -1785,11 +1954,26 @@ async function onActionClick(event) {
       if (!stream) return;
       state.draft.streamId = id;
       state.draft.streamTenantId = stream.tenantId ?? "";
+      setStreamFormState(streamFormDefaults(state.dashboard, state.session, stream), false);
       state.page = "streams";
       syncAppRoute(state.session.role, state.page);
       renderSidebarNavigation(state.session);
       applyPageVisibility(state.session);
       renderStreamForm(state.dashboard, state.session);
+      return;
+    }
+    if (action === "duplicate-stream") {
+      const stream = state.dashboard.streams.find((item) => item.id === id);
+      if (!stream) return;
+      state.draft.streamId = null;
+      state.draft.streamTenantId = stream.tenantId ?? "";
+      setStreamFormState(duplicateStreamValues(stream, state.dashboard, state.session), false);
+      state.page = "streams";
+      syncAppRoute(state.session.role, state.page);
+      renderSidebarNavigation(state.session);
+      applyPageVisibility(state.session);
+      renderStreamForm(state.dashboard, state.session);
+      showToast("已复制该直播流配置，修改后保存即可新建。");
       return;
     }
     if (action === "delete-stream") {
@@ -2019,11 +2203,24 @@ function bindEvents() {
     const target = event.target;
     if (!(target instanceof HTMLElement) || !state.dashboard || !state.session) return;
 
+    if (target.matches('#streamForm input, #streamForm textarea, #streamForm select')) {
+      const form = qs("#streamForm");
+      if (form) {
+        setStreamFormState(readStreamFormState(form), true);
+      }
+    }
+
     if (target.matches('#serverForm [name="tenantId"]')) {
       state.draft.serverTenantId = target.value;
       renderServerForm(state.dashboard, state.session);
     }
     if (target.matches('#streamForm [name="tenantId"]')) {
+      const form = qs("#streamForm");
+      if (form) {
+        const values = readStreamFormState(form);
+        values.tenantId = target.value;
+        setStreamFormState(values, true);
+      }
       state.draft.streamTenantId = target.value;
       renderStreamForm(state.dashboard, state.session);
     }
@@ -2031,6 +2228,15 @@ function bindEvents() {
       state.draft.groupTenantId = target.value;
       renderGroupForm(state.dashboard, state.session);
     }
+  });
+
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.matches('#streamForm input, #streamForm textarea')) return;
+    const form = qs("#streamForm");
+    if (!form) return;
+    setStreamFormState(readStreamFormState(form), true);
   });
 
   qs("#appShell").addEventListener("click", async (event) => {
@@ -2105,6 +2311,21 @@ function bindEvents() {
       if (target.id === "saveAndStartStreamButton") {
         return showToast(await saveStreamFromForm({ startAfterSave: true }));
       }
+      if (target.id === "duplicateStreamButton") {
+        const streamId = target.dataset.streamId || state.draft.streamId;
+        if (!streamId) {
+          throw new Error("请先选择一条已有直播流，再复制配置。");
+        }
+        const stream = state.dashboard?.streams.find((item) => item.id === streamId);
+        if (!stream) {
+          throw new Error("未找到要复制的直播流。");
+        }
+        state.draft.streamId = null;
+        state.draft.streamTenantId = stream.tenantId ?? "";
+        setStreamFormState(duplicateStreamValues(stream, state.dashboard, state.session), false);
+        renderStreamForm(state.dashboard, state.session);
+        return showToast("已复制当前直播流配置，修改后保存即可新建。");
+      }
       if (target.id === "resetStreamButton") {
         resetDrafts("stream");
         renderStreamForm(state.dashboard, state.session);
@@ -2175,6 +2396,6 @@ bindEvents();
 initializeSession().catch((error) => showToast(error.message, true));
 setInterval(() => {
   if (state.session) {
-    refreshAdmin().catch(console.error);
+    refreshAdmin({ preserveStreamForm: true }).catch(console.error);
   }
 }, 15000);
