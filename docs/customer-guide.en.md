@@ -35,6 +35,8 @@ Recommended direct routes:
 - CDK activation: `/redeem`
 - platform admin login: `/admin/login`
 
+The public root `/` is intentionally customer-facing and does not show the super-admin entry card.
+
 ## 3. Plan your groups first
 
 The dashboard is designed for:
@@ -65,6 +67,16 @@ Open **Server Management** and fill:
 - Optional notes
 
 Use labels that clearly describe the server at a glance.
+
+## 4A. Auto-import currently running streams over SSH
+
+If the server is already live, you can avoid manual re-entry:
+
+1. Save the server first.
+2. Use **SSH Discover Current Streams** in the server page.
+3. The platform logs in to the server, scans running `ffmpeg` processes, detects YouTube stream keys and media paths, and imports them into **Stream Management** automatically.
+
+This is useful when you are onboarding servers that are already streaming.
 
 ## 5. Add a stream
 

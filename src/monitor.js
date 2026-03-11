@@ -5,6 +5,56 @@ function shellSingleQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function normalizeStreamKey(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^rtmp:\/\/[^/]+\/live2\//i, "")
+    .replace(/^live2\//i, "")
+    .trim();
+}
+
+function normalizeMediaPath(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.includes("/") ? normalized : `/root/${normalized}`;
+}
+
+function unquoteShellToken(value) {
+  const text = String(value ?? "").trim();
+  if (
+    (text.startsWith("'") && text.endsWith("'")) ||
+    (text.startsWith('"') && text.endsWith('"'))
+  ) {
+    return text.slice(1, -1);
+  }
+
+  return text;
+}
+
+function buildManagedMatchTerms(sourcePath, streamKey) {
+  return [...new Set([
+    normalizeStreamKey(streamKey),
+    normalizeMediaPath(sourcePath)
+  ].filter(Boolean))];
+}
+
+function parseManagedStreamFields(command) {
+  const text = String(command ?? "").trim();
+  if (!text) {
+    return { sourcePath: "", streamKey: "" };
+  }
+
+  const sourceMatch = text.match(/(?:^|\s)-i\s+('(?:[^']|\\')*'|"(?:[^"\\]|\\.)*"|\S+)/);
+  const streamKeyMatch = text.match(/rtmp:\/\/[^/\s'"]+\/live2\/([A-Za-z0-9-]+)/i);
+  return {
+    sourcePath: sourceMatch ? normalizeMediaPath(unquoteShellToken(sourceMatch[1])) : "",
+    streamKey: streamKeyMatch ? normalizeStreamKey(streamKeyMatch[1]) : ""
+  };
+}
+
 function trimRestartHistory(history, nowMs, windowSeconds) {
   return history.filter((timestamp) => timestamp >= nowMs - windowSeconds * 1000);
 }
@@ -49,6 +99,34 @@ function findMatchingProcess(processes, matchTerms) {
 async function collectProcesses(session) {
   const result = await session.run("ps -eo pid=,args= | grep [f]fmpeg || true");
   return parseProcessLines(result.stdout);
+}
+
+function discoverRunningStreams(processes) {
+  const seen = new Set();
+  return processes.map((process) => {
+    const managed = parseManagedStreamFields(process.args);
+    return {
+      pid: process.pid,
+      command: process.args,
+      sourcePath: managed.sourcePath,
+      sourceFileName: managed.sourcePath ? managed.sourcePath.split("/").pop() : "",
+      streamKey: managed.streamKey,
+      label: managed.sourcePath ? managed.sourcePath.split("/").pop() : `ffmpeg-${process.pid}`,
+      matchTerms: buildManagedMatchTerms(managed.sourcePath, managed.streamKey)
+    };
+  }).filter((item) => {
+    if (!item.sourcePath || !item.streamKey) {
+      return false;
+    }
+
+    const key = `${item.sourcePath}::${item.streamKey}`;
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
 export class StreamMonitor {
@@ -109,6 +187,108 @@ export class StreamMonitor {
 
   getPublicStatus(actor = null) {
     return this.database.getDashboardData(this.startedAt, this.isBusy, actor);
+  }
+
+  getServerForActor(serverId, actor = null) {
+    const allowedIds = new Set(this.database.listServers(false, actor).map((item) => item.id));
+    const server = this.database.listServers(true, actor).find((item) => item.id === serverId && allowedIds.has(item.id));
+    if (!server) {
+      throw new Error(`Unknown server ${serverId}`);
+    }
+
+    return server;
+  }
+
+  async discoverServerStreams(serverId, actor = null) {
+    const server = this.getServerForActor(serverId, actor);
+    const session = new SshSession(server, this.database.getRuntimeSettings().connectionTimeoutSeconds);
+    try {
+      await session.connect();
+      const processes = await collectProcesses(session);
+      const streams = discoverRunningStreams(processes);
+      this.recordEvent("info", "server.discovery.completed", "Discovered live ffmpeg streams from server", {
+        serverId,
+        discoveredCount: streams.length
+      });
+      return {
+        ok: true,
+        serverId,
+        streams
+      };
+    } finally {
+      session.close();
+    }
+  }
+
+  async importServerStreams(serverId, actor = null) {
+    const server = this.getServerForActor(serverId, actor);
+    const discovery = await this.discoverServerStreams(serverId, actor);
+    const existingStreams = this.database.listStreams(false, actor);
+    const imported = [];
+    const skipped = [];
+    const now = new Date().toISOString();
+
+    for (const item of discovery.streams) {
+      const duplicate = existingStreams.find((stream) => (
+        stream.serverId === server.id &&
+        stream.sourcePath === item.sourcePath &&
+        stream.streamKey === item.streamKey
+      ));
+
+      if (duplicate) {
+        skipped.push({
+          reason: "exists",
+          streamId: duplicate.id,
+          label: duplicate.label,
+          sourcePath: item.sourcePath,
+          streamKey: item.streamKey
+        });
+        continue;
+      }
+
+      const created = this.database.saveStream({
+        tenantId: server.tenantId,
+        serverId: server.id,
+        label: item.label,
+        sourcePath: item.sourcePath,
+        streamKey: item.streamKey,
+        matchTerms: item.matchTerms,
+        enabled: true
+      }, actor);
+      this.database.updateStreamRuntime(created.id, {
+        status: "healthy",
+        lastSeenAt: now,
+        lastRestartAt: null,
+        restartHistory: [],
+        lastError: null,
+        discoveredCommand: item.command
+      });
+      imported.push(created);
+      existingStreams.push(created);
+    }
+
+    this.recordEvent("info", "server.discovery.imported", "Imported live ffmpeg streams from server", {
+      serverId,
+      discoveredCount: discovery.streams.length,
+      importedCount: imported.length,
+      skippedCount: skipped.length
+    });
+
+    return {
+      ok: true,
+      serverId,
+      discoveredCount: discovery.streams.length,
+      importedCount: imported.length,
+      skippedCount: skipped.length,
+      imported,
+      skipped,
+      streams: discovery.streams,
+      message: imported.length > 0
+        ? `Discovered ${discovery.streams.length} live stream(s); imported ${imported.length}, skipped ${skipped.length}.`
+        : discovery.streams.length > 0
+          ? `Discovered ${discovery.streams.length} live stream(s), but all were already imported.`
+          : "No running YouTube ffmpeg streams were discovered on this server."
+    };
   }
 
   async runOnce(reason = "manual") {

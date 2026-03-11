@@ -62,11 +62,11 @@ function statusCodeForError(error) {
     return 404;
   }
 
-  if (/already running|already initialized|quota reached/i.test(message)) {
+  if (/already running|already initialized|quota reached|already exists/i.test(message)) {
     return 409;
   }
 
-  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota|must match/i.test(message)) {
+  if (/required|invalid|incorrect|does not exist|at least|not active|expired|already used|no available quota|must match|can only be used/i.test(message)) {
     return 400;
   }
 
@@ -300,6 +300,11 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
     res.json({ ok: true });
   }));
 
+  app.post("/api/servers/:serverId/import-live-streams", requireAuth, createAsyncHandler(logger, async (req, res) => {
+    const result = await monitor.importServerStreams(req.params.serverId, req.sessionUser);
+    res.json(result);
+  }));
+
   app.post("/api/groups", requireAuth, createAsyncHandler(logger, async (req, res) => {
     const group = database.saveServerGroup({
       tenantId: req.body.tenantId,
@@ -434,8 +439,12 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
   }));
 
   app.post("/api/redeem-codes", requireSuperAdmin, createAsyncHandler(logger, async (req, res) => {
-    const redeemCode = database.createRedeemCode(req.body);
-    res.json({ ok: true, redeemCode });
+    const redeemCodes = database.createRedeemCodes(req.body);
+    res.json({
+      ok: true,
+      redeemCode: redeemCodes[0] ?? null,
+      redeemCodes
+    });
   }));
 
   app.use("/api", (_req, res) => {

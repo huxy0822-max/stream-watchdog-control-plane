@@ -131,6 +131,13 @@ function generateRedeemCodeValue() {
     .toUpperCase();
 }
 
+function normalizeRedeemCodeValue(value) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+}
+
 function parseLegacyJson(filePath) {
   const resolved = path.resolve(filePath);
   if (!fs.existsSync(resolved)) {
@@ -1676,45 +1683,71 @@ export class AppDatabase {
     }));
   }
 
-  createRedeemCode(input) {
-    const now = nowIso();
-    const code = String(input.code ?? generateRedeemCodeValue())
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9]/g, "");
-    if (code.length < 8) {
-      throw new Error("Redeem code must be at least 8 letters or numbers.");
+  createRedeemCodes(input) {
+    const quantity = Math.max(1, Math.min(100, Number(input.quantity ?? 1)));
+    const customCode = normalizeRedeemCodeValue(input.code);
+    if (quantity > 1 && customCode) {
+      throw new Error("Custom code can only be used when generating one CDK at a time.");
     }
 
-    const payload = {
-      id: createId("cdk"),
-      code,
-      label: String(input.label ?? "Standard Plan").trim() || "Standard Plan",
-      durationDays: Number(input.durationDays ?? 30),
-      maxUsers: Number(input.maxUsers ?? 1),
-      maxServers: Number(input.maxServers ?? 20),
-      maxStreams: Number(input.maxStreams ?? 200),
-      notes: String(input.notes ?? "").trim()
-    };
-
-    this.db.prepare(`
+    const label = String(input.label ?? "Standard Plan").trim() || "Standard Plan";
+    const durationDays = Number(input.durationDays ?? 30);
+    const maxUsers = Number(input.maxUsers ?? 1);
+    const maxServers = Number(input.maxServers ?? 20);
+    const maxStreams = Number(input.maxStreams ?? 200);
+    const notes = String(input.notes ?? "").trim();
+    const insert = this.db.prepare(`
       INSERT INTO redeem_codes (
         id, code, label, duration_days, max_users, max_servers, max_streams, status, notes, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'unused', ?, ?, ?)
-    `).run(
-      payload.id,
-      payload.code,
-      payload.label,
-      payload.durationDays,
-      payload.maxUsers,
-      payload.maxServers,
-      payload.maxStreams,
-      payload.notes,
-      now,
-      now
-    );
+    `);
+    const createdIds = [];
 
-    return this.listRedeemCodes().find((item) => item.id === payload.id);
+    for (let index = 0; index < quantity; index += 1) {
+      const now = nowIso();
+      const id = createId("cdk");
+      let code = customCode;
+
+      if (!code) {
+        let attempts = 0;
+        do {
+          code = generateRedeemCodeValue();
+          attempts += 1;
+        } while (
+          this.db.prepare("SELECT 1 FROM redeem_codes WHERE code = ?").get(code) &&
+          attempts < 20
+        );
+      }
+
+      if (code.length < 8) {
+        throw new Error("Redeem code must be at least 8 letters or numbers.");
+      }
+
+      if (this.db.prepare("SELECT 1 FROM redeem_codes WHERE code = ?").get(code)) {
+        throw new Error(`Redeem code ${code} already exists.`);
+      }
+
+      insert.run(
+        id,
+        code,
+        label,
+        durationDays,
+        maxUsers,
+        maxServers,
+        maxStreams,
+        notes,
+        now,
+        now
+      );
+      createdIds.push(id);
+    }
+
+    const createdIdSet = new Set(createdIds);
+    return this.listRedeemCodes().filter((item) => createdIdSet.has(item.id));
+  }
+
+  createRedeemCode(input) {
+    return this.createRedeemCodes(input)[0] ?? null;
   }
 
   redeemCode(input) {

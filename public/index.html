@@ -11,16 +11,16 @@
 
     <div id="authShell" class="auth-shell">
       <section class="auth-brand">
-        <p class="eyebrow">STREAM CONTROL</p>
+        <p class="eyebrow">STREAM CRM</p>
         <h1>直播控制后台</h1>
         <p class="muted">
-          面向多服务器、多直播间和后续商用扩展的推流监控控制台。平台管理员和普通用户使用不同入口，管理边界分开。
+          面向多服务器、多直播间和后续商业化扩展的推流监控控制台。主域名仅展示普通用户和 CDK 开通入口，超级管理员只通过专用地址访问。
         </p>
         <div class="brand-pills">
           <span>异常优先</span>
           <span>自动恢复</span>
           <span>分组巡检</span>
-          <span>CDK 开通</span>
+          <span>CRM 导航</span>
         </div>
       </section>
 
@@ -46,11 +46,11 @@
           <p class="eyebrow">PLATFORM ADMIN</p>
           <h2>超级管理员入口</h2>
           <p class="muted">用于平台配置、客户空间、CDK、资源巡检和全局管理。</p>
-          <div class="auth-entry-actions">
+          <div class="auth-entry-actions hidden">
             <a class="button primary auth-entry-link" href="/admin/login">打开管理员登录</a>
           </div>
           <div class="auth-route-actions hidden">
-            <a class="button ghost small" href="/">返回入口页</a>
+            <a class="button ghost small" href="/">返回首页</a>
           </div>
           <form id="adminLoginForm" class="form-grid auth-form">
             <label>
@@ -70,10 +70,10 @@
           <h2>普通用户 / VIP 用户入口</h2>
           <p class="muted">用于查看自己分组下的服务器和直播流，执行恢复，维护本空间配置。</p>
           <div class="auth-entry-actions">
-            <a class="button secondary auth-entry-link" href="/customer/login">打开用户登录</a>
+            <a class="button secondary auth-entry-link" href="/customer/login">进入用户登录</a>
           </div>
           <div class="auth-route-actions hidden">
-            <a class="button ghost small" href="/">返回入口页</a>
+            <a class="button ghost small" href="/">返回首页</a>
           </div>
           <form id="customerLoginForm" class="form-grid auth-form">
             <label>
@@ -96,7 +96,7 @@
             <a class="button ghost auth-entry-link" href="/redeem">进入 CDK 开通</a>
           </div>
           <div class="auth-route-actions hidden">
-            <a class="button ghost small" href="/">返回入口页</a>
+            <a class="button ghost small" href="/">返回首页</a>
           </div>
           <form id="redeemForm" class="form-grid auth-form">
             <label>
@@ -126,271 +126,331 @@
     </div>
 
     <main id="appShell" class="app-shell hidden">
-      <header class="topbar">
-        <div>
-          <p id="heroEyebrow" class="eyebrow">CONTROL PLANE</p>
-          <h1 id="heroTitle">直播控制后台</h1>
-        </div>
-        <div class="topbar-actions">
-          <span id="currentRoleBadge" class="role-badge">访客</span>
-          <div class="identity-card">
-            <span>当前账号</span>
-            <strong id="currentUserLabel">-</strong>
+      <div class="app-layout">
+        <aside class="app-sidebar">
+          <div class="sidebar-brand">
+            <p class="eyebrow">STREAM CRM</p>
+            <h2 class="sidebar-title">直播管理系统</h2>
+            <p class="muted">按角色分后台，按模块分页面。</p>
           </div>
-          <button id="scanButton" class="button primary" type="button">立即巡检</button>
-          <button id="logoutButton" class="button ghost" type="button">退出登录</button>
-        </div>
-      </header>
+          <nav id="appSidebarNav" class="sidebar-nav"></nav>
+        </aside>
 
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow" id="heroModeLabel">LIVE WATCHDOG</p>
-          <h2 id="panelTitle">Stream Watchdog</h2>
-          <p id="heroSubtitle" class="muted">面向多服务器、多直播间的自动巡检与恢复后台。</p>
-        </div>
-        <div id="workspaceSnapshotPanel" class="hero-side hidden"></div>
-      </section>
-
-      <section id="metrics" class="metrics"></section>
-
-      <section class="layout-grid">
-        <section class="panel">
-          <div class="panel-header">
+        <div class="app-main">
+          <header class="topbar">
             <div>
-              <p class="eyebrow">ISSUES FIRST</p>
-              <h3>异常优先处理</h3>
+              <p id="heroEyebrow" class="eyebrow">CONTROL PLANE</p>
+              <h1 id="heroTitle">直播控制后台</h1>
             </div>
-            <span class="badge">单独列出</span>
-          </div>
-          <div class="problem-grid">
-            <div>
-              <h4>异常服务器</h4>
-              <div id="problemServers" class="stack-list compact"></div>
-            </div>
-            <div>
-              <h4>异常直播流</h4>
-              <div id="problemStreams" class="stack-list compact"></div>
-            </div>
-          </div>
-        </section>
-      </section>
-
-      <section id="infrastructurePanel" class="panel hidden">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">INFRA OBSERVABILITY</p>
-            <h3>管理服务器资源</h3>
-          </div>
-          <span class="badge">仅超级管理员</span>
-        </div>
-        <div class="resource-layout">
-          <section class="panel inset-panel">
-            <h4>主机资源</h4>
-            <div id="hostResourceGrid" class="resource-grid"></div>
-          </section>
-          <section class="panel inset-panel">
-            <h4>本程序资源与流量</h4>
-            <div id="appResourceGrid" class="resource-grid"></div>
-          </section>
-        </div>
-      </section>
-
-      <section id="groupManagerPanel" class="panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">GROUPS</p>
-            <h3>分组管理</h3>
-          </div>
-          <span class="badge">分组决定你的巡检层级</span>
-        </div>
-        <div class="layout-grid group-layout">
-          <section class="panel inset-panel">
-            <h4>分组设置</h4>
-            <form id="groupForm" class="form-grid"></form>
-            <div class="inline-actions">
-              <button id="saveGroupButton" class="button primary" type="button">保存分组</button>
-              <button id="resetGroupButton" class="button ghost" type="button">清空表单</button>
-            </div>
-          </section>
-          <section class="panel inset-panel">
-            <div class="panel-header">
-              <div>
-                <h4>已有分组</h4>
+            <div class="topbar-actions">
+              <span id="currentRoleBadge" class="role-badge">访客</span>
+              <div class="identity-card">
+                <span>当前账号</span>
+                <strong id="currentUserLabel">-</strong>
               </div>
-              <span id="groupCountBadge" class="badge"></span>
+              <button id="scanButton" class="button primary" type="button">立即巡检</button>
+              <button id="logoutButton" class="button ghost" type="button">退出登录</button>
             </div>
-            <div id="groupList" class="stack-list compact"></div>
+          </header>
+
+          <section class="hero">
+            <div class="hero-copy">
+              <p class="eyebrow" id="heroModeLabel">LIVE WATCHDOG</p>
+              <h2 id="panelTitle">Stream Watchdog</h2>
+              <p id="heroSubtitle" class="muted">面向多服务器、多直播间的自动巡检与恢复后台。</p>
+            </div>
+            <div id="heroContextCard" class="hero-side">
+              <p class="eyebrow">CURRENT PAGE</p>
+              <div class="workspace-snapshot">
+                <div class="title" id="pageContextTitle">总览</div>
+                <div class="subtle" id="pageContextDescription">先看异常，再看分组、服务器和直播流。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="page-section" data-page="overview">
+            <div id="workspaceSnapshotPanel" class="panel hidden"></div>
+            <section id="metricsPanel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">OVERVIEW</p>
+                  <h3>核心指标</h3>
+                </div>
+                <span class="badge">实时概览</span>
+              </div>
+              <div id="metrics" class="metrics"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">ISSUES FIRST</p>
+                  <h3>异常优先处理</h3>
+                </div>
+                <span class="badge">单独列出</span>
+              </div>
+              <div class="problem-grid">
+                <div>
+                  <h4>异常服务器</h4>
+                  <div id="problemServers" class="stack-list compact"></div>
+                </div>
+                <div>
+                  <h4>异常直播流</h4>
+                  <div id="problemStreams" class="stack-list compact"></div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="matrix">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">MATRIX</p>
+                  <h3>直播矩阵</h3>
+                </div>
+                <span id="streamCountBadge" class="badge"></span>
+              </div>
+              <div class="panel-toolbar">
+                <input id="matrixSearch" type="search" placeholder="搜索直播名、服务器、主机或关键字" />
+                <select id="matrixStatusFilter">
+                  <option value="all">全部状态</option>
+                  <option value="healthy">healthy</option>
+                  <option value="restarting">restarting</option>
+                  <option value="cooldown">cooldown</option>
+                  <option value="failed">failed</option>
+                  <option value="unknown">unknown</option>
+                </select>
+              </div>
+              <div id="streamMatrix" class="matrix-grid"></div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="groups">
+            <section id="groupManagerPanel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">GROUPS</p>
+                  <h3>分组管理</h3>
+                </div>
+                <span class="badge">用户自定义分组</span>
+              </div>
+              <div class="layout-grid group-layout">
+                <section class="panel inset-panel">
+                  <h4>分组设置</h4>
+                  <form id="groupForm" class="form-grid"></form>
+                  <div class="inline-actions">
+                    <button id="saveGroupButton" class="button primary" type="button">保存分组</button>
+                    <button id="resetGroupButton" class="button ghost" type="button">清空表单</button>
+                  </div>
+                </section>
+                <section class="panel inset-panel">
+                  <div class="panel-header">
+                    <div>
+                      <h4>已有分组</h4>
+                    </div>
+                    <span id="groupCountBadge" class="badge"></span>
+                  </div>
+                  <div id="groupList" class="stack-list compact"></div>
+                </section>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">GROUP EXPLORER</p>
+                  <h3>分组巡检视图</h3>
+                </div>
+                <div id="explorerLevelToolbar" class="explorer-toolbar"></div>
+              </div>
+              <div id="groupExplorer" class="group-explorer"></div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="servers">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">SERVERS</p>
+                  <h3>服务器管理</h3>
+                </div>
+                <span id="serverCountBadge" class="badge"></span>
+              </div>
+              <form id="serverForm" class="form-grid two-col"></form>
+              <div class="inline-actions">
+                <button id="saveServerButton" class="button primary" type="button">保存服务器</button>
+                <button id="discoverServerStreamsButton" class="button secondary hidden" type="button">SSH 识别当前推流</button>
+                <button id="resetServerButton" class="button ghost" type="button">清空表单</button>
+              </div>
+              <div class="subtle">保存服务器后可一键通过 SSH 识别当前正在直播的 ffmpeg 推流并自动导入。</div>
+              <div id="serverList" class="stack-list"></div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="streams">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">STREAMS</p>
+                  <h3>直播流管理</h3>
+                </div>
+                <span id="streamListBadge" class="badge">按筛选结果显示</span>
+              </div>
+              <form id="streamForm" class="form-grid two-col"></form>
+              <div class="subtle">填写媒体文件名和推流码后，系统会自动生成 ffmpeg 重推命令。新建时不填直播流名称会默认使用文件名。</div>
+              <div class="inline-actions">
+                <button id="saveAndStartStreamButton" class="button secondary" type="button">保存并立即开播</button>
+                <button id="saveStreamButton" class="button primary" type="button">保存直播流</button>
+                <button id="resetStreamButton" class="button ghost" type="button">清空表单</button>
+              </div>
+              <div id="streamList" class="stack-list"></div>
+            </section>
+          </section>
+
+          <section id="workspaceAdminPage" class="page-section hidden" data-page="workspaces" data-role="super_admin">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">CUSTOMERS</p>
+                  <h3>客户空间</h3>
+                </div>
+                <span class="badge">超级管理员</span>
+              </div>
+              <form id="workspaceForm" class="form-grid"></form>
+              <div class="inline-actions">
+                <button id="saveWorkspaceButton" class="button primary" type="button">保存客户空间</button>
+                <button id="resetWorkspaceButton" class="button ghost" type="button">清空表单</button>
+              </div>
+              <div id="workspaceList" class="stack-list compact"></div>
+            </section>
+          </section>
+
+          <section id="userAdminPage" class="page-section hidden" data-page="users" data-role="super_admin">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">USERS</p>
+                  <h3>客户账号</h3>
+                </div>
+                <span class="badge">超级管理员</span>
+              </div>
+              <form id="userForm" class="form-grid"></form>
+              <div class="inline-actions">
+                <button id="saveUserButton" class="button primary" type="button">创建账号</button>
+              </div>
+              <div id="userList" class="stack-list compact"></div>
+            </section>
+          </section>
+
+          <section id="cdkAdminPage" class="page-section hidden" data-page="cdk" data-role="super_admin">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">CDK CRM</p>
+                  <h3>CDK 管理</h3>
+                </div>
+                <span class="badge">支持批量生成</span>
+              </div>
+              <form id="redeemCodeForm" class="form-grid"></form>
+              <div class="inline-actions">
+                <button id="saveRedeemCodeButton" class="button primary" type="button">生成 CDK</button>
+              </div>
+              <div id="redeemCodeList" class="stack-list compact"></div>
+            </section>
+          </section>
+
+          <section id="resourcesPage" class="page-section hidden" data-page="resources" data-role="super_admin">
+            <section id="infrastructurePanel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">INFRA OBSERVABILITY</p>
+                  <h3>管理服务器资源</h3>
+                </div>
+                <span class="badge">超级管理员</span>
+              </div>
+              <div class="resource-layout">
+                <section class="panel inset-panel">
+                  <h4>主机资源</h4>
+                  <div id="hostResourceGrid" class="resource-grid"></div>
+                </section>
+                <section class="panel inset-panel">
+                  <h4>本程序资源与流量</h4>
+                  <div id="appResourceGrid" class="resource-grid"></div>
+                </section>
+              </div>
+            </section>
+          </section>
+
+          <section id="settingsPage" class="page-section hidden" data-page="settings" data-role="super_admin">
+            <section id="runtimePanel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">PLATFORM SETTINGS</p>
+                  <h3>平台设置</h3>
+                </div>
+                <span class="badge">超级管理员</span>
+              </div>
+              <form id="runtimeForm" class="form-grid two-col"></form>
+              <div class="inline-actions">
+                <button id="saveRuntimeButton" class="button primary" type="button">保存平台设置</button>
+              </div>
+            </section>
+          </section>
+
+          <section id="notificationsPage" class="page-section hidden" data-page="notifications" data-role="super_admin">
+            <section id="emailPanel" class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">NOTIFICATIONS</p>
+                  <h3>邮件通知</h3>
+                </div>
+                <span class="badge">SMTP</span>
+              </div>
+              <form id="emailForm" class="form-grid two-col"></form>
+              <div class="inline-actions">
+                <button id="saveEmailButton" class="button primary" type="button">保存邮件配置</button>
+                <button id="testEmailButton" class="button ghost" type="button">发送测试邮件</button>
+              </div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="events">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">EVENTS</p>
+                  <h3>事件记录</h3>
+                </div>
+                <span class="badge">固定滚动</span>
+              </div>
+              <div id="eventFeed" class="events"></div>
+            </section>
+          </section>
+
+          <section class="page-section hidden" data-page="security">
+            <section class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">SECURITY</p>
+                  <h3>账号安全</h3>
+                </div>
+                <span class="badge">密码更新</span>
+              </div>
+              <form id="passwordForm" class="form-grid">
+                <label>
+                  <span>当前密码</span>
+                  <input name="currentPassword" type="password" required />
+                </label>
+                <label>
+                  <span>新密码</span>
+                  <input name="nextPassword" type="password" minlength="8" required />
+                </label>
+                <button class="button primary" type="submit">更新密码</button>
+              </form>
+            </section>
           </section>
         </div>
-      </section>
-
-      <section id="runtimePanel" class="panel hidden">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">PLATFORM SETTINGS</p>
-            <h3>平台设置</h3>
-          </div>
-          <span class="badge">仅超级管理员</span>
-        </div>
-        <form id="runtimeForm" class="form-grid two-col"></form>
-      </section>
-
-      <section id="emailPanel" class="panel hidden">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">NOTIFICATIONS</p>
-            <h3>邮件通知</h3>
-          </div>
-          <span class="badge">SMTP</span>
-        </div>
-        <form id="emailForm" class="form-grid two-col"></form>
-        <div class="inline-actions">
-          <button id="saveEmailButton" class="button primary" type="button">保存邮件配置</button>
-          <button id="testEmailButton" class="button ghost" type="button">发送测试邮件</button>
-        </div>
-      </section>
-
-      <section id="superAdminPanel" class="panel hidden">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">PLATFORM OPERATIONS</p>
-            <h3>客户空间与开通管理</h3>
-          </div>
-          <span class="badge">客户空间 / 账号 / CDK</span>
-        </div>
-        <div class="super-grid">
-          <div class="panel inset-panel">
-            <h4>客户空间</h4>
-            <form id="workspaceForm" class="form-grid"></form>
-            <div class="inline-actions">
-              <button id="saveWorkspaceButton" class="button primary" type="button">保存客户空间</button>
-              <button id="resetWorkspaceButton" class="button ghost" type="button">清空表单</button>
-            </div>
-            <div id="workspaceList" class="stack-list compact"></div>
-          </div>
-
-          <div class="panel inset-panel">
-            <h4>客户账号</h4>
-            <form id="userForm" class="form-grid"></form>
-            <div class="inline-actions">
-              <button id="saveUserButton" class="button primary" type="button">创建账号</button>
-            </div>
-            <div id="userList" class="stack-list compact"></div>
-          </div>
-
-          <div class="panel inset-panel">
-            <h4>CDK 开通码</h4>
-            <form id="redeemCodeForm" class="form-grid"></form>
-            <div class="inline-actions">
-              <button id="saveRedeemCodeButton" class="button primary" type="button">生成 CDK</button>
-            </div>
-            <div id="redeemCodeList" class="stack-list compact"></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">MATRIX</p>
-            <h3>直播矩阵</h3>
-          </div>
-          <span id="streamCountBadge" class="badge"></span>
-        </div>
-        <div class="panel-toolbar">
-          <input id="matrixSearch" type="search" placeholder="搜索直播名、服务器、主机或关键字" />
-          <select id="matrixStatusFilter">
-            <option value="all">全部状态</option>
-            <option value="healthy">healthy</option>
-            <option value="restarting">restarting</option>
-            <option value="cooldown">cooldown</option>
-            <option value="failed">failed</option>
-            <option value="unknown">unknown</option>
-          </select>
-        </div>
-        <div id="streamMatrix" class="matrix-grid"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <div>
-            <p class="eyebrow">GROUP EXPLORER</p>
-            <h3>分组巡检视图</h3>
-          </div>
-          <div id="explorerLevelToolbar" class="explorer-toolbar"></div>
-        </div>
-        <div id="groupExplorer" class="group-explorer"></div>
-      </section>
-
-      <section class="layout-grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">SERVERS</p>
-              <h3>服务器管理</h3>
-            </div>
-            <span id="serverCountBadge" class="badge"></span>
-          </div>
-          <form id="serverForm" class="form-grid two-col"></form>
-          <div class="inline-actions">
-            <button id="saveServerButton" class="button primary" type="button">保存服务器</button>
-            <button id="resetServerButton" class="button ghost" type="button">清空表单</button>
-          </div>
-          <div id="serverList" class="stack-list"></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">STREAMS</p>
-              <h3>直播流管理</h3>
-            </div>
-            <span id="streamListBadge" class="badge">按筛选结果显示</span>
-          </div>
-          <form id="streamForm" class="form-grid two-col"></form>
-          <div class="subtle">填写媒体文件名和推流码后，系统会自动生成 ffmpeg 重推命令。新建时不填直播流名称会默认使用文件名。</div>
-          <div class="inline-actions">
-            <button id="saveAndStartStreamButton" class="button secondary" type="button">保存并立即开播</button>
-            <button id="saveStreamButton" class="button primary" type="button">保存直播流</button>
-            <button id="resetStreamButton" class="button ghost" type="button">清空表单</button>
-          </div>
-          <div id="streamList" class="stack-list"></div>
-        </section>
-      </section>
-
-      <section class="layout-grid">
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">SECURITY</p>
-              <h3>账号安全</h3>
-            </div>
-            <span class="badge">密码更新</span>
-          </div>
-          <form id="passwordForm" class="form-grid">
-            <label>
-              <span>当前密码</span>
-              <input name="currentPassword" type="password" required />
-            </label>
-            <label>
-              <span>新密码</span>
-              <input name="nextPassword" type="password" minlength="8" required />
-            </label>
-            <button class="button primary" type="submit">更新密码</button>
-          </form>
-        </section>
-
-        <section class="panel">
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">EVENTS</p>
-              <h3>事件记录</h3>
-            </div>
-            <span class="badge">固定滚动</span>
-          </div>
-          <div id="eventFeed" class="events"></div>
-        </section>
-      </section>
+      </div>
     </main>
 
     <div id="toast" class="toast hidden"></div>

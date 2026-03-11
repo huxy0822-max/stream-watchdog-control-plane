@@ -1,6 +1,7 @@
 const state = {
   session: null,
   dashboard: null,
+  page: "overview",
   draft: {
     serverId: null,
     streamId: null,
@@ -94,6 +95,110 @@ function syncAuthRoute(setupRequired, mode) {
   if (window.location.pathname !== target) {
     window.history.replaceState({}, "", target);
   }
+}
+
+const PAGE_META = {
+  overview: { title: "总览", description: "先看异常，再看客户空间、分组和恢复状态。" },
+  matrix: { title: "直播矩阵", description: "按状态筛选全部直播流，适合快速检索和批量巡检。" },
+  groups: { title: "分组巡检", description: "按分组、服务器、直播流三级展开，适合日常运营查看。" },
+  servers: { title: "服务器管理", description: "维护 SSH 配置，并可一键识别当前正在直播的推流。" },
+  streams: { title: "直播流管理", description: "维护媒体文件、推流码、重推命令和恢复策略。" },
+  workspaces: { title: "客户空间", description: "管理客户空间额度、状态、到期时间和基础资料。" },
+  users: { title: "客户账号", description: "创建和删除客户后台账号，保持空间隔离。" },
+  cdk: { title: "CDK 管理", description: "批量生成不同套餐的 CDK，支持后续服务销售。" },
+  resources: { title: "资源监控", description: "查看管理服务器和当前程序本身的 CPU、内存、流量占用。" },
+  settings: { title: "平台设置", description: "调整巡检间隔、超时和全局运行参数。" },
+  notifications: { title: "通知设置", description: "配置 SMTP 和测试邮件通知链路。" },
+  events: { title: "事件记录", description: "查看最近的重要系统事件，超出后滚动浏览。" },
+  security: { title: "账号安全", description: "维护当前登录账号密码。" }
+};
+
+function pageGroupsForRole(role) {
+  if (role === "super_admin") {
+    return [
+      {
+        title: "控制台",
+        items: [
+          { page: "overview", label: "总览", meta: "异常与核心指标" },
+          { page: "matrix", label: "直播矩阵", meta: "全局直播检索" },
+          { page: "groups", label: "分组巡检", meta: "三级结构视图" },
+          { page: "servers", label: "服务器", meta: "SSH 与自动识别" },
+          { page: "streams", label: "直播流", meta: "推流码与恢复" }
+        ]
+      },
+      {
+        title: "CRM",
+        items: [
+          { page: "workspaces", label: "客户空间", meta: "套餐与额度" },
+          { page: "users", label: "客户账号", meta: "后台账号管理" },
+          { page: "cdk", label: "CDK 管理", meta: "支持批量生成" }
+        ]
+      },
+      {
+        title: "平台",
+        items: [
+          { page: "resources", label: "资源监控", meta: "主机与程序占用" },
+          { page: "settings", label: "平台设置", meta: "巡检与会话参数" },
+          { page: "notifications", label: "通知设置", meta: "SMTP 与邮件" },
+          { page: "events", label: "事件记录", meta: "系统日志" },
+          { page: "security", label: "账号安全", meta: "修改当前密码" }
+        ]
+      }
+    ];
+  }
+
+  return [
+    {
+      title: "控制台",
+      items: [
+        { page: "overview", label: "总览", meta: "异常与核心指标" },
+        { page: "matrix", label: "直播矩阵", meta: "当前空间直播检索" },
+        { page: "groups", label: "分组巡检", meta: "三级结构视图" },
+        { page: "servers", label: "服务器", meta: "SSH 与自动识别" },
+        { page: "streams", label: "直播流", meta: "推流与恢复配置" }
+      ]
+    },
+    {
+      title: "账户",
+      items: [
+        { page: "events", label: "事件记录", meta: "近期操作与告警" },
+        { page: "security", label: "账号安全", meta: "修改当前密码" }
+      ]
+    }
+  ];
+}
+
+function normalizePageForRole(role, requestedPage) {
+  const allowedPages = new Set(pageGroupsForRole(role).flatMap((group) => group.items.map((item) => item.page)));
+  return allowedPages.has(requestedPage) ? requestedPage : "overview";
+}
+
+function parseAppPage(role) {
+  const pathname = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (role === "super_admin") {
+    if (pathname.startsWith("/admin/") && pathname !== "/admin/login") {
+      return pathname.slice("/admin/".length) || "overview";
+    }
+    return "overview";
+  }
+
+  if (pathname.startsWith("/customer/") && pathname !== "/customer/login") {
+    return pathname.slice("/customer/".length) || "overview";
+  }
+
+  return "overview";
+}
+
+function syncAppRoute(role, page, replace = false) {
+  const target = role === "super_admin"
+    ? `/admin/${page}`
+    : `/customer/${page}`;
+  if (window.location.pathname === target) {
+    return;
+  }
+
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({}, "", target);
 }
 
 function showToast(message, isError = false) {
@@ -356,7 +461,8 @@ function renderAuth(setupRequired) {
 
   document.querySelectorAll("[data-auth-card]").forEach((card) => {
     const cardMode = card.dataset.authCard;
-    const visible = !setupRequired && (landing || cardMode === mode);
+    const landingVisible = landing && ["customer", "redeem"].includes(cardMode);
+    const visible = !setupRequired && (landingVisible || cardMode === mode);
     const form = card.querySelector(".auth-form");
     const entryActions = card.querySelector(".auth-entry-actions");
     const routeActions = card.querySelector(".auth-route-actions");
@@ -365,6 +471,38 @@ function renderAuth(setupRequired) {
     entryActions?.classList.toggle("hidden", !landing);
     routeActions?.classList.toggle("hidden", landing || cardMode !== mode);
   });
+}
+
+function renderSidebarNavigation(user) {
+  const nav = qs("#appSidebarNav");
+  if (!nav) return;
+  const groups = pageGroupsForRole(user.role);
+  nav.innerHTML = groups.map((group) => `
+    <section class="nav-group">
+      <div class="nav-group-title">${escapeHtml(group.title)}</div>
+      <div class="nav-group-links">
+        ${group.items.map((item) => `
+          <button class="nav-link" type="button" data-page-nav="${escapeHtml(item.page)}" data-active="${item.page === state.page ? "true" : "false"}">
+            <span class="nav-link-title">${escapeHtml(item.label)}</span>
+            <span class="nav-link-meta">${escapeHtml(item.meta)}</span>
+          </button>
+        `).join("")}
+      </div>
+    </section>
+  `).join("");
+}
+
+function applyPageVisibility(user) {
+  document.querySelectorAll(".page-section").forEach((section) => {
+    const requiredRole = section.dataset.role;
+    const allowed = !requiredRole || requiredRole === user.role;
+    const active = allowed && section.dataset.page === state.page;
+    section.classList.toggle("hidden", !active);
+  });
+
+  const meta = PAGE_META[state.page] ?? PAGE_META.overview;
+  qs("#pageContextTitle").textContent = meta.title;
+  qs("#pageContextDescription").textContent = meta.description;
 }
 
 function renderWorkspaceSnapshot(dashboard, user) {
@@ -609,6 +747,12 @@ function renderServerForm(dashboard, user) {
     const select = qs('#serverForm [name="tenantId"]');
     if (select) select.value = tenantId;
   }
+
+  const discoverButton = qs("#discoverServerStreamsButton");
+  if (discoverButton) {
+    discoverButton.classList.toggle("hidden", !current?.id);
+    discoverButton.dataset.serverId = current?.id ?? "";
+  }
 }
 
 function renderStreamForm(dashboard, user) {
@@ -668,7 +812,8 @@ function renderUserForm(dashboard) {
 
 function renderRedeemCodeForm() {
   qs("#redeemCodeForm").innerHTML = `
-    <label><span>CDK</span><input name="code" placeholder="留空则自动生成" /></label>
+    <label><span>自定义 CDK</span><input name="code" placeholder="仅单个生成时可填写" /></label>
+    <label><span>生成数量</span><input name="quantity" type="number" min="1" max="100" value="1" /></label>
     <label><span>套餐名称</span><input name="label" value="VIP Standard" /></label>
     <label><span>有效天数</span><input name="durationDays" type="number" value="30" /></label>
     <label><span>最大账号数</span><input name="maxUsers" type="number" value="1" /></label>
@@ -725,6 +870,7 @@ function renderServerList(dashboard) {
           <div class="subtle">${escapeHtml(server.groupName)} · ${escapeHtml(server.host)}:${escapeHtml(server.port)} · ${escapeHtml(server.username)}</div>
           <div class="subtle">正在播 ${liveCount} / ${streams.length} · 最后巡检 ${escapeHtml(formatTime(server.lastCheckedAt))}</div>
           <div class="card-actions">
+            <button class="button secondary" data-action="discover-server-streams" data-id="${escapeHtml(server.id)}">识别推流</button>
             <button class="button ghost" data-action="edit-server" data-id="${escapeHtml(server.id)}">编辑</button>
             <button class="button ghost" data-action="delete-server" data-id="${escapeHtml(server.id)}">删除</button>
           </div>
@@ -926,9 +1072,6 @@ function renderEvents(dashboard) {
 
 function renderSuperAdmin(dashboard, user) {
   const visible = user.role === "super_admin";
-  qs("#superAdminPanel").classList.toggle("hidden", !visible);
-  qs("#runtimePanel").classList.toggle("hidden", !visible);
-  qs("#emailPanel").classList.toggle("hidden", !visible);
   if (!visible) return;
 
   renderRuntimeForm(dashboard.runtimeSettings);
@@ -978,6 +1121,8 @@ function renderDashboard(payload) {
   state.session = payload.user;
   state.dashboard = payload.dashboard;
   const isSuper = payload.user.role === "super_admin";
+  state.page = normalizePageForRole(payload.user.role, parseAppPage(payload.user.role));
+  syncAppRoute(payload.user.role, state.page, true);
 
   setView("app", isSuper ? "super_admin" : "customer");
   qs("#authShell").classList.add("hidden");
@@ -1005,6 +1150,8 @@ function renderDashboard(payload) {
   renderGroupExplorer(payload.dashboard);
   renderEvents(payload.dashboard);
   renderSuperAdmin(payload.dashboard, payload.user);
+  renderSidebarNavigation(payload.user);
+  applyPageVisibility(payload.user);
 }
 
 async function refreshAdmin() {
@@ -1051,7 +1198,7 @@ async function submitLogin(form, mode) {
 }
 
 async function onActionClick(event) {
-  const button = event.target.closest("button[data-action]");
+  const button = event.target instanceof Element ? event.target.closest("button[data-action]") : null;
   if (!button) return;
   const { action, id, key, level } = button.dataset;
 
@@ -1061,6 +1208,10 @@ async function onActionClick(event) {
       if (!group) return;
       state.draft.groupId = id;
       state.draft.groupTenantId = group.tenantId ?? "";
+      state.page = "groups";
+      syncAppRoute(state.session.role, state.page);
+      renderSidebarNavigation(state.session);
+      applyPageVisibility(state.session);
       renderGroupForm(state.dashboard, state.session);
       return;
     }
@@ -1075,6 +1226,10 @@ async function onActionClick(event) {
       if (!server) return;
       state.draft.serverId = id;
       state.draft.serverTenantId = server.tenantId ?? "";
+      state.page = "servers";
+      syncAppRoute(state.session.role, state.page);
+      renderSidebarNavigation(state.session);
+      applyPageVisibility(state.session);
       renderServerForm(state.dashboard, state.session);
       return;
     }
@@ -1084,11 +1239,22 @@ async function onActionClick(event) {
       await refreshAdmin();
       return showToast("服务器已删除");
     }
+    if (action === "discover-server-streams") {
+      const result = await api(`/api/servers/${encodeURIComponent(id)}/import-live-streams`, { method: "POST" });
+      state.page = "streams";
+      syncAppRoute(state.session.role, state.page);
+      await refreshAdmin();
+      return showToast(result.message ?? "已完成推流识别");
+    }
     if (action === "edit-stream") {
       const stream = state.dashboard.streams.find((item) => item.id === id);
       if (!stream) return;
       state.draft.streamId = id;
       state.draft.streamTenantId = stream.tenantId ?? "";
+      state.page = "streams";
+      syncAppRoute(state.session.role, state.page);
+      renderSidebarNavigation(state.session);
+      applyPageVisibility(state.session);
       renderStreamForm(state.dashboard, state.session);
       return;
     }
@@ -1105,6 +1271,10 @@ async function onActionClick(event) {
     }
     if (action === "edit-workspace") {
       state.draft.workspaceId = id;
+      state.page = "workspaces";
+      syncAppRoute(state.session.role, state.page);
+      renderSidebarNavigation(state.session);
+      applyPageVisibility(state.session);
       renderWorkspaceForm(state.dashboard);
       return;
     }
@@ -1140,6 +1310,15 @@ async function onActionClick(event) {
 
 function bindEvents() {
   document.addEventListener("click", onActionClick);
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-page-nav]") : null;
+    if (!(target instanceof HTMLElement) || !state.session) return;
+    const nextPage = normalizePageForRole(state.session.role, target.dataset.pageNav);
+    state.page = nextPage;
+    syncAppRoute(state.session.role, nextPage);
+    renderSidebarNavigation(state.session);
+    applyPageVisibility(state.session);
+  });
 
   qs("#setupForm").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -1298,6 +1477,17 @@ function bindEvents() {
         await refreshAdmin();
         return showToast("服务器已保存");
       }
+      if (target.id === "discoverServerStreamsButton") {
+        const serverId = target.dataset.serverId || state.draft.serverId;
+        if (!serverId) {
+          throw new Error("请先保存服务器，再执行 SSH 识别。");
+        }
+        const result = await api(`/api/servers/${encodeURIComponent(serverId)}/import-live-streams`, { method: "POST" });
+        state.page = "streams";
+        syncAppRoute(state.session.role, state.page);
+        await refreshAdmin();
+        return showToast(result.message ?? "已完成推流识别");
+      }
       if (target.id === "resetServerButton") {
         resetDrafts("server");
         renderServerForm(state.dashboard, state.session);
@@ -1333,14 +1523,21 @@ function bindEvents() {
         return showToast("客户账号已创建");
       }
       if (target.id === "saveRedeemCodeButton") {
-        await api("/api/redeem-codes", { method: "POST", body: serializeForm(qs("#redeemCodeForm")) });
+        const result = await api("/api/redeem-codes", { method: "POST", body: serializeForm(qs("#redeemCodeForm")) });
         qs("#redeemCodeForm").reset();
         await refreshAdmin();
-        return showToast("CDK 已生成");
+        return showToast(`已生成 ${result.redeemCodes?.length ?? 0} 个 CDK`);
       }
     } catch (error) {
       showToast(error.message, true);
     }
+  });
+
+  window.addEventListener("popstate", () => {
+    if (!state.session) return;
+    state.page = normalizePageForRole(state.session.role, parseAppPage(state.session.role));
+    renderSidebarNavigation(state.session);
+    applyPageVisibility(state.session);
   });
 }
 

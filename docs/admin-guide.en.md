@@ -25,6 +25,7 @@ The super-admin dashboard can manage:
 - email notification settings
 - control-plane host and application resource usage
 - separate login portals and customer activation flow
+- CRM-style sidebar pages for each operational module
 
 Customer users cannot see those platform-wide controls.
 
@@ -47,6 +48,9 @@ Best for repeatable service packages.
 3. The customer activates the workspace themselves.
 4. The customer logs in through the customer portal.
 
+The public root `/` now shows only customer login and CDK activation.
+The super-admin entry is intentionally direct-route only: `/admin/login`.
+
 ## 4. Create a workspace
 
 Fill:
@@ -67,6 +71,7 @@ Treat the slug as a stable internal identifier.
 Useful fields:
 
 - code
+- quantity
 - plan label
 - duration
 - max users
@@ -78,6 +83,8 @@ Recommended naming pattern:
 
 - `VIP-30D-10S-100L`
 - `VIP-90D-20S-300L`
+
+For standardized service sales, use batch generation and create several CDKs for the same package in one operation.
 
 ## 6. Train customers to use groups
 
@@ -102,6 +109,8 @@ Also train them to use the simplified stream onboarding flow:
 - click **Save and Start**
 
 This avoids customers writing raw `ffmpeg` commands unless they truly need a custom advanced flow.
+
+If the customer already has active streams on a server, train them to use the built-in SSH discovery/import button from the server page. That flow can scan live `ffmpeg` processes and create the matching stream records automatically.
 
 ## 7. Runtime settings
 

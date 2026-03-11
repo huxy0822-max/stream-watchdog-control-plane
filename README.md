@@ -10,13 +10,17 @@ This repository is now structured as an English-first project with a browser das
 - Multi-server monitoring and automatic restart for `ffmpeg` live streams
 - Issue-first dashboard with separate views for super admin and customer operators
 - Separate auth routes for platform admin, customer ops, and CDK activation
+- Public root only shows customer and CDK access; super admin is direct-route only
 - Group-based hierarchy: `group -> server -> stream`
 - Manual recovery, scheduled checks, cooldown and restart-window protection
 - Managed stream creation from only a media filename/path and YouTube stream key
+- One-click SSH discovery/import of currently running YouTube `ffmpeg` streams
 - Customer workspaces, customer users, and CDK-based activation
+- Batch CDK generation for repeatable service packages
 - SQLite-backed state instead of local-only JSON scripts
 - Built-in email notification settings
 - Super-admin infrastructure panel showing host resources and application resource usage
+- CRM-style sidebar navigation with dedicated pages per module
 - Docker deployment support
 
 ## Product positioning
@@ -87,6 +91,8 @@ After bootstrap, the direct auth routes are:
 - `/customer/login`
 - `/redeem`
 
+The public root `/` intentionally does not expose the super-admin entry card.
+
 ## Repository layout
 
 - `src/`: backend, monitoring engine, auth, database, web server
@@ -149,9 +155,12 @@ Implemented now:
 
 - SSH monitoring and automatic restart logic
 - workspace/user/CDK control plane
+- batch CDK generation
+- SSH live-stream discovery/import from remote servers
 - group management and collapsible hierarchy explorer
 - infrastructure metrics for super admin
 - browser dashboard with customer/admin separation
+- CRM-style sidebar navigation and dedicated module pages
 
 Planned next:
 

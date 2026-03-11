@@ -176,17 +176,20 @@ try {
     }
   });
 
-  const redeemCode = await request("/api/redeem-codes", {
+  const redeemCodeBatch = await request("/api/redeem-codes", {
     method: "POST",
     body: {
-      code: "ALPHA2026",
       label: "Alpha Plan",
       durationDays: 30,
       maxUsers: 2,
       maxServers: 5,
-      maxStreams: 10
+      maxStreams: 10,
+      quantity: 2
     }
   });
+  if (!Array.isArray(redeemCodeBatch.redeemCodes) || redeemCodeBatch.redeemCodes.length !== 2) {
+    throw new Error("Batch CDK generation should return multiple codes.");
+  }
 
   const serverCreate = await request("/api/servers", {
     method: "POST",
@@ -359,7 +362,7 @@ try {
   await request("/api/redeem", {
     method: "POST",
     body: {
-      code: redeemCode.redeemCode.code,
+      code: redeemCodeBatch.redeemCodes[0].code,
       tenantName: "Tenant Redeemed",
       tenantSlug: "tenant-redeemed",
       username: "redeemed-admin",
@@ -389,6 +392,11 @@ try {
   }));
 } finally {
   await new Promise((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+
     server.close((error) => {
       if (error) {
         reject(error);
