@@ -348,6 +348,21 @@ function buildManagedMatchTerms(sourcePath, streamKey) {
   ]);
 }
 
+function shellSingleQuote(value) {
+  return `'${String(value ?? "").replaceAll("'", `'\\''`)}'`;
+}
+
+function buildManagedRestartCommand(sourcePath, streamKey) {
+  const normalizedSource = normalizeMediaPath(sourcePath);
+  const normalizedKey = normalizeStreamKey(streamKey);
+  if (!normalizedSource || !normalizedKey) {
+    return "";
+  }
+
+  const rtmpUrl = `rtmp://a.rtmp.youtube.com/live2/${normalizedKey}`;
+  return `nohup ffmpeg -stream_loop -1 -re -i ${shellSingleQuote(normalizedSource)} -c:v copy -c:a copy -f flv ${shellSingleQuote(rtmpUrl)} > /dev/null 2>&1 &`;
+}
+
 function normalizeBooleanInput(value, fallback = true) {
   if (typeof value === "boolean") return value;
   if (value === undefined || value === null || value === "") return fallback;
@@ -356,16 +371,28 @@ function normalizeBooleanInput(value, fallback = true) {
 }
 
 function normalizeStreamFormValues(values = {}, fallbackEnabled = true) {
+  const sourcePath = normalizeMediaPath(values.sourcePath ?? "");
+  const streamKey = normalizeStreamKey(values.streamKey ?? "");
+  const managedMatchTerms = sourcePath && streamKey
+    ? buildManagedMatchTerms(sourcePath, streamKey)
+    : (Array.isArray(values.matchTerms)
+      ? values.matchTerms.map((item) => String(item).trim()).filter(Boolean)
+      : String(values.matchTerms ?? "")
+        .split(/\r?\n|,/)
+        .map((item) => item.trim())
+        .filter(Boolean));
+  const restartCommand = sourcePath && streamKey
+    ? buildManagedRestartCommand(sourcePath, streamKey)
+    : String(values.restartCommand ?? "").trim();
+
   return {
     tenantId: String(values.tenantId ?? "").trim(),
     serverId: String(values.serverId ?? "").trim(),
     label: String(values.label ?? "").trim(),
-    sourcePath: String(values.sourcePath ?? "").trim(),
-    streamKey: String(values.streamKey ?? "").trim(),
-    matchTerms: Array.isArray(values.matchTerms)
-      ? values.matchTerms.join("\n")
-      : String(values.matchTerms ?? ""),
-    restartCommand: String(values.restartCommand ?? "").trim(),
+    sourcePath,
+    streamKey,
+    matchTerms: managedMatchTerms.join("\n"),
+    restartCommand,
     restartLogPath: String(values.restartLogPath ?? "").trim(),
     cooldownSeconds: String(values.cooldownSeconds ?? 60),
     restartWindowSeconds: String(values.restartWindowSeconds ?? 300),
@@ -603,8 +630,9 @@ function buildStreamPayload(form) {
   const body = serializeForm(form);
   const sourcePath = normalizeMediaPath(body.sourcePath);
   const streamKey = normalizeStreamKey(body.streamKey);
-  const manualMatchTerms = textareaLines(form, "matchTerms");
-  const managedMatchTerms = buildManagedMatchTerms(sourcePath, streamKey);
+  const managedMatchTerms = sourcePath && streamKey
+    ? buildManagedMatchTerms(sourcePath, streamKey)
+    : [];
   const label = String(body.label ?? "").trim() || (sourcePath ? sourcePath.split("/").pop() : "");
 
   return {
@@ -612,9 +640,26 @@ function buildStreamPayload(form) {
     label,
     sourcePath,
     streamKey,
-    matchTerms: dedupe([...managedMatchTerms, ...manualMatchTerms]),
+    matchTerms: managedMatchTerms,
     enabled: checkboxValue(form, "enabled")
   };
+}
+
+function syncManagedStreamPreview(form) {
+  if (!form) {
+    return;
+  }
+
+  const values = readStreamFormState(form);
+  const matchTermsField = form.querySelector('[name="matchTerms"]');
+  if (matchTermsField) {
+    matchTermsField.value = values?.matchTerms ?? "";
+  }
+
+  const restartCommandField = form.querySelector('[name="restartCommand"]');
+  if (restartCommandField) {
+    restartCommandField.value = values?.restartCommand ?? "";
+  }
 }
 
 function streamIdentityHtml(stream) {
@@ -1243,7 +1288,7 @@ function renderWorkspaceForm(dashboard) {
   if (current?.status) qs('#workspaceForm [name="status"]').value = current.status;
 }
 
-function renderStreamForm(dashboard, user) {
+function renderStreamFormSnapshot(dashboard, user) {
   const current = dashboard.streams.find((item) => item.id === state.draft.streamId) ?? null;
   const values = resolveStreamFormValues(dashboard, user, current);
   const workspaceField = user.role === "super_admin"
@@ -1282,6 +1327,49 @@ function renderStreamForm(dashboard, user) {
     stopButton.classList.toggle("hidden", !current?.id || !values.enabled);
     stopButton.dataset.streamId = current?.id ?? "";
   }
+}
+
+function renderStreamForm(dashboard, user) {
+  const current = dashboard.streams.find((item) => item.id === state.draft.streamId) ?? null;
+  const values = resolveStreamFormValues(dashboard, user, current);
+  const workspaceField = user.role === "super_admin"
+    ? `<label><span>所属客户空间</span><select name="tenantId"><option value="">请选择客户空间</option>${workspaceOptions(dashboard)}</select></label>`
+    : "";
+
+  qs("#streamForm").innerHTML = `
+    ${workspaceField}
+    <label><span>所属服务器</span><select name="serverId"><option value="">请选择服务器</option>${serverOptions(dashboard, values.tenantId, values.serverId)}</select></label>
+    <label><span>直播流名称</span><input name="label" value="${escapeHtml(values.label)}" /></label>
+    <label><span>媒体文件名 / 路径</span><input name="sourcePath" value="${escapeHtml(values.sourcePath)}" placeholder="/root/lbo2.mp4 或 lbo2.mp4" /></label>
+    <label><span>YouTube 推流码</span><input name="streamKey" value="${escapeHtml(values.streamKey)}" placeholder="r6ab-8cc4-g8sg-jduw-a1qm" /></label>
+    <label><span>自动匹配关键字</span><textarea name="matchTerms" readonly>${escapeHtml(values.matchTerms)}</textarea></label>
+    <label><span>自动重启命令</span><textarea name="restartCommand" readonly>${escapeHtml(values.restartCommand)}</textarea></label>
+    <label><span>重启日志路径</span><input name="restartLogPath" value="${escapeHtml(values.restartLogPath)}" /></label>
+    <label><span>冷却时间（秒）</span><input name="cooldownSeconds" type="number" value="${escapeHtml(values.cooldownSeconds)}" /></label>
+    <label><span>重启窗口（秒）</span><input name="restartWindowSeconds" type="number" value="${escapeHtml(values.restartWindowSeconds)}" /></label>
+    <label><span>窗口内最大重启数</span><input name="maxRestartsInWindow" type="number" value="${escapeHtml(values.maxRestartsInWindow)}" /></label>
+    <label><span>验证延迟（秒）</span><input name="verifyDelaySeconds" type="number" value="${escapeHtml(values.verifyDelaySeconds)}" /></label>
+    <label><span><input name="enabled" type="checkbox" ${values.enabled ? "checked" : ""} /> 启用直播流</span></label>
+  `;
+
+  if (user.role === "super_admin") {
+    const tenantSelect = qs('#streamForm [name="tenantId"]');
+    if (tenantSelect) tenantSelect.value = values.tenantId;
+  }
+
+  const duplicateButton = qs("#duplicateStreamButton");
+  if (duplicateButton) {
+    duplicateButton.classList.toggle("hidden", !current?.id);
+    duplicateButton.dataset.streamId = current?.id ?? "";
+  }
+
+  const stopButton = qs("#stopStreamButton");
+  if (stopButton) {
+    stopButton.classList.toggle("hidden", !current?.id || !values.enabled);
+    stopButton.dataset.streamId = current?.id ?? "";
+  }
+
+  syncManagedStreamPreview(qs("#streamForm"));
 }
 
 function renderUserForm(dashboard) {
