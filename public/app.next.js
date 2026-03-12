@@ -21,6 +21,10 @@ const state = {
     dirty: false,
     values: null
   },
+  stopDialog: {
+    streamId: null,
+    streamLabel: ""
+  },
   filters: {
     query: "",
     status: "all"
@@ -56,6 +60,7 @@ const STATUS_LABELS = {
   down: "离线",
   active: "有效",
   disabled: "停用",
+  stopped: "已关闭",
   expired: "已到期",
   unused: "未使用",
   redeemed: "已兑换"
@@ -85,6 +90,7 @@ function statusLabel(status) {
 function statusClass(status) {
   if (["healthy", "up", "active", "unused"].includes(status)) return "status-healthy";
   if (["restarting", "cooldown", "redeemed"].includes(status)) return "status-restarting";
+  if (["stopped"].includes(status)) return "status-stopped";
   return "status-failed";
 }
 
@@ -723,6 +729,98 @@ function parseIdList(value) {
     .filter(Boolean))];
 }
 
+function streamStateNotice(stream) {
+  if (stream.status === "stopped" || !stream.enabled) {
+    return '<div class="subtle">这路直播已被手动关闭，当前不会自动恢复。</div>';
+  }
+
+  return "";
+}
+
+function streamRecoverLabel(stream) {
+  return stream.enabled ? "恢复" : "重新开播";
+}
+
+function renderStreamActionButtons(stream, options = {}) {
+  const buttons = [];
+  const showRecover = options.showRecover ?? true;
+  const includeEdit = options.includeEdit ?? true;
+  const includeDuplicate = options.includeDuplicate ?? false;
+  const includeDelete = options.includeDelete ?? false;
+  const includeStop = options.includeStop ?? stream.enabled;
+  const editLabel = options.editLabel ?? "编辑";
+
+  if (showRecover) {
+    buttons.push(`<button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">${escapeHtml(streamRecoverLabel(stream))}</button>`);
+  }
+
+  if (includeStop && stream.enabled) {
+    buttons.push(`<button class="button danger" data-action="stop-stream" data-id="${escapeHtml(stream.id)}">关闭直播</button>`);
+  }
+
+  if (includeEdit) {
+    buttons.push(`<button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">${escapeHtml(editLabel)}</button>`);
+  }
+
+  if (includeDuplicate) {
+    buttons.push(`<button class="button ghost" data-action="duplicate-stream" data-id="${escapeHtml(stream.id)}">复制配置</button>`);
+  }
+
+  if (includeDelete) {
+    buttons.push(`<button class="button ghost" data-action="delete-stream" data-id="${escapeHtml(stream.id)}">删除</button>`);
+  }
+
+  return buttons.join("");
+}
+
+function closeStopStreamModal() {
+  state.stopDialog = {
+    streamId: null,
+    streamLabel: ""
+  };
+
+  const modal = qs("#stopStreamModal");
+  modal?.classList.add("hidden");
+  modal?.setAttribute("aria-hidden", "true");
+  if (qs("#stopStreamTarget")) {
+    qs("#stopStreamTarget").textContent = "-";
+  }
+  qs("#stopStreamForm")?.reset();
+}
+
+function openStopStreamModal(stream) {
+  if (!stream) {
+    throw new Error("未找到要关闭的直播流。");
+  }
+
+  state.stopDialog = {
+    streamId: stream.id,
+    streamLabel: stream.label
+  };
+
+  const modal = qs("#stopStreamModal");
+  qs("#stopStreamForm")?.reset();
+  qs("#stopStreamTarget").textContent = stream.label;
+  modal?.classList.remove("hidden");
+  modal?.setAttribute("aria-hidden", "false");
+  window.setTimeout(() => qs('#stopStreamForm [name="secondaryPassword"]')?.focus(), 0);
+}
+
+async function submitStopStream(form) {
+  if (!state.stopDialog.streamId) {
+    throw new Error("请先选择要关闭的直播流。");
+  }
+
+  const streamLabel = state.stopDialog.streamLabel;
+  const result = await api(`/api/streams/${encodeURIComponent(state.stopDialog.streamId)}/stop`, {
+    method: "POST",
+    body: serializeForm(form)
+  });
+  closeStopStreamModal();
+  await refreshAdmin({ preserveStreamForm: true, preserveServerForm: true });
+  return result.message ?? `已关闭直播：${streamLabel}`;
+}
+
 async function recoverStreamBatch(streamIds, label = "批量恢复") {
   const ids = parseIdList(streamIds);
   if (ids.length === 0) {
@@ -894,6 +992,7 @@ function renderWorkspaceSnapshot(dashboard, user) {
 function renderMetrics(dashboard, user) {
   const badServers = dashboard.servers.filter((server) => server.enabled && server.connectionStatus !== "up").length;
   const badStreams = dashboard.streams.filter((stream) => stream.enabled && stream.status !== "healthy").length;
+  const healthyStreams = dashboard.streams.filter((stream) => stream.enabled && stream.status === "healthy").length;
   const items = user.role === "super_admin"
     ? [
         ["客户空间", dashboard.tenants?.length ?? 0],
@@ -902,7 +1001,7 @@ function renderMetrics(dashboard, user) {
         ["异常直播流", badStreams]
       ]
     : [
-        ["正常直播流", dashboard.streams.filter((stream) => stream.status === "healthy").length],
+        ["正常直播流", healthyStreams],
         ["异常直播流", badStreams],
         ["服务器分组", dashboard.groups?.length ?? 0],
         ["异常服务器", badServers]
@@ -915,6 +1014,15 @@ function renderMetrics(dashboard, user) {
       <div class="muted">最后巡检 ${escapeHtml(formatTime(dashboard.meta.lastCycleAt))}</div>
     </article>
   `).join("");
+}
+
+function renderSecuritySection(user) {
+  const hint = qs("#secondaryPasswordHint");
+  if (!hint) return;
+
+  hint.textContent = user.hasSecondaryPassword
+    ? "你已经设置了独立二次密码。关闭直播等高风险操作会优先验证它。"
+    : "当前未设置独立二次密码。二次密码默认等于登录密码，关闭直播时直接输入登录密码即可。";
 }
 
 function renderRuntimeMetrics(dashboard, user) {
@@ -1168,6 +1276,12 @@ function renderStreamForm(dashboard, user) {
     duplicateButton.classList.toggle("hidden", !current?.id);
     duplicateButton.dataset.streamId = current?.id ?? "";
   }
+
+  const stopButton = qs("#stopStreamButton");
+  if (stopButton) {
+    stopButton.classList.toggle("hidden", !current?.id || !values.enabled);
+    stopButton.dataset.streamId = current?.id ?? "";
+  }
 }
 
 function renderUserForm(dashboard) {
@@ -1285,10 +1399,7 @@ function renderProblemLists(dashboard) {
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")}</div>
         ${streamIdentityHtml(stream)}
         <div class="subtle">${escapeHtml(stream.lastError ?? "需要优先恢复")}</div>
-        <div class="card-actions">
-          <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">立即恢复</button>
-          <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">查看直播流</button>
-        </div>
+        <div class="card-actions">${renderStreamActionButtons(stream, { editLabel: "查看直播流", includeStop: true })}</div>
       </article>
     `).join("");
 }
@@ -1329,12 +1440,8 @@ function renderStreamViews(dashboard) {
         <div class="title">${escapeHtml(stream.label)}</div>
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")} · 最近发现 ${escapeHtml(formatTime(stream.lastSeenAt))}</div>
         ${streamIdentityHtml(stream)}
-        <div class="card-actions">
-          <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
-          <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
-          <button class="button ghost" data-action="duplicate-stream" data-id="${escapeHtml(stream.id)}">复制配置</button>
-          <button class="button ghost" data-action="delete-stream" data-id="${escapeHtml(stream.id)}">删除</button>
-        </div>
+        ${streamStateNotice(stream)}
+        <div class="card-actions">${renderStreamActionButtons(stream, { includeDuplicate: true, includeDelete: true, includeStop: true })}</div>
       </article>
     `).join("");
 
@@ -1347,11 +1454,8 @@ function renderStreamViews(dashboard) {
         <div class="subtle">${escapeHtml(stream.serverLabel ?? "")}</div>
         <div class="subtle">最后发现：${escapeHtml(formatTime(stream.lastSeenAt))}</div>
         ${streamIdentityHtml(stream)}
-        <div class="card-actions">
-          <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
-          <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
-          <button class="button ghost" data-action="duplicate-stream" data-id="${escapeHtml(stream.id)}">复制配置</button>
-        </div>
+        ${streamStateNotice(stream)}
+        <div class="card-actions">${renderStreamActionButtons(stream, { includeDuplicate: true, includeStop: true })}</div>
       </article>
     `).join("");
 }
@@ -1599,11 +1703,9 @@ function renderOperationsMatrix(dashboard) {
                                 <div class="title">${escapeHtml(stream.label)}</div>
                                 <div class="subtle">${escapeHtml(formatTime(stream.lastSeenAt))} · ${escapeHtml(stream.serverLabel ?? server.label)}</div>
                                 ${streamIdentityHtml(stream)}
+                                ${streamStateNotice(stream)}
                               </div>
-                              <div class="card-actions">
-                                ${stream.status !== "healthy" ? `<button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>` : ""}
-                                <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">查看</button>
-                              </div>
+                              <div class="card-actions">${renderStreamActionButtons(stream, { showRecover: stream.status !== "healthy" || !stream.enabled, editLabel: "查看", includeStop: true })}</div>
                             </article>
                           `).join("")}
                         ${server.hiddenHealthyCount > 0 ? `<div class="subtle">还有 ${server.hiddenHealthyCount} 路稳定直播流已折叠，可切到“显示全部分组”查看。</div>` : ""}
@@ -1741,11 +1843,9 @@ function renderGroupExplorer(dashboard) {
                               <div class="title">${escapeHtml(stream.label)}</div>
                               <div class="subtle">最后发现 ${escapeHtml(formatTime(stream.lastSeenAt))}</div>
                               ${streamIdentityHtml(stream)}
+                              ${streamStateNotice(stream)}
                             </div>
-                            <div class="card-actions">
-                              <button class="button ghost" data-action="recover-stream" data-id="${escapeHtml(stream.id)}">恢复</button>
-                              <button class="button ghost" data-action="edit-stream" data-id="${escapeHtml(stream.id)}">编辑</button>
-                            </div>
+                            <div class="card-actions">${renderStreamActionButtons(stream, { includeStop: true })}</div>
                           </article>
                         `).join("")}
                       </div>
@@ -1907,6 +2007,7 @@ function renderDashboard(payload, { preserveStreamForm = false, preserveServerFo
   renderOperationsMatrix(payload.dashboard);
   renderGroupExplorer(payload.dashboard);
   renderEvents(payload.dashboard);
+  renderSecuritySection(payload.user);
   renderSuperAdmin(payload.dashboard, payload.user);
   renderSidebarNavigation(payload.user);
   applyPageVisibility(payload.user);
@@ -2057,6 +2158,11 @@ async function onActionClick(event) {
       await refreshAdmin();
       return showToast("直播流已删除");
     }
+    if (action === "stop-stream") {
+      const stream = state.dashboard.streams.find((item) => item.id === id);
+      openStopStreamModal(stream);
+      return;
+    }
     if (action === "recover-stream") {
       const result = await api(`/api/streams/${encodeURIComponent(id)}/recover`, { method: "POST" });
       await refreshAdmin();
@@ -2204,6 +2310,7 @@ function bindEvents() {
     state.collapsedOpsGroups = {};
     state.collapsedOpsServers = {};
     resetDrafts();
+    closeStopStreamModal();
     renderAuth(false);
   });
 
@@ -2223,6 +2330,30 @@ function bindEvents() {
       await api("/api/account/password", { method: "POST", body: serializeForm(event.currentTarget) });
       event.currentTarget.reset();
       showToast("密码已更新");
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
+
+  qs("#secondaryPasswordForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      await api("/api/account/secondary-password", { method: "POST", body: serializeForm(event.currentTarget) });
+      event.currentTarget.reset();
+      if (state.session) {
+        state.session.hasSecondaryPassword = true;
+        renderSecuritySection(state.session);
+      }
+      showToast("二次密码已更新");
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
+
+  qs("#stopStreamForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    try {
+      showToast(await submitStopStream(event.currentTarget));
     } catch (error) {
       showToast(error.message, true);
     }
@@ -2425,6 +2556,12 @@ function bindEvents() {
         renderStreamForm(state.dashboard, state.session);
         return;
       }
+      if (target.id === "stopStreamButton") {
+        const streamId = target.dataset.streamId || state.draft.streamId;
+        const stream = state.dashboard?.streams.find((item) => item.id === streamId);
+        openStopStreamModal(stream);
+        return;
+      }
       if (target.id === "saveWorkspaceButton") {
         const path = state.draft.workspaceId ? `/api/tenants/${encodeURIComponent(state.draft.workspaceId)}` : "/api/tenants";
         await api(path, { method: state.draft.workspaceId ? "PUT" : "POST", body: serializeForm(qs("#workspaceForm")) });
@@ -2475,6 +2612,20 @@ function bindEvents() {
       } catch (error) {
         showToast(error.message, true);
       }
+    }
+  });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("[data-modal-close]") : null;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.dataset.modalClose === "stop-stream") {
+      closeStopStreamModal();
+    }
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !qs("#stopStreamModal")?.classList.contains("hidden")) {
+      closeStopStreamModal();
     }
   });
 

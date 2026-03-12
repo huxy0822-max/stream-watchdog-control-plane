@@ -1,4 +1,4 @@
-import { setTimeout as delay } from "node:timers/promises";
+﻿import { setTimeout as delay } from "node:timers/promises";
 import { SshSession } from "./ssh.js";
 
 function shellSingleQuote(value) {
@@ -94,6 +94,10 @@ function parseProcessLines(stdout) {
 
 function findMatchingProcess(processes, matchTerms) {
   return processes.find((process) => matchTerms.every((term) => process.args.includes(term))) ?? null;
+}
+
+function findMatchingProcesses(processes, matchTerms) {
+  return processes.filter((process) => matchTerms.every((term) => process.args.includes(term)));
 }
 
 async function collectProcesses(session) {
@@ -193,7 +197,7 @@ export class StreamMonitor {
     const allowedIds = new Set(this.database.listServers(false, actor).map((item) => item.id));
     const server = this.database.listServers(true, actor).find((item) => item.id === serverId && allowedIds.has(item.id));
     if (!server) {
-      throw new Error(`未找到服务器：${serverId}`);
+      throw new Error(`Server not found: ${serverId}`);
     }
 
     return server;
@@ -296,7 +300,7 @@ export class StreamMonitor {
       return {
         ok: false,
         skipped: true,
-        message: "已有监控任务正在运行。"
+        message: "A monitoring cycle is already running."
       };
     }
 
@@ -331,7 +335,7 @@ export class StreamMonitor {
       return {
         ok: true,
         skipped: false,
-        message: "巡检已完成。"
+        message: "Monitoring cycle completed."
       };
     } finally {
       this.isBusy = false;
@@ -350,19 +354,18 @@ export class StreamMonitor {
 
   async recoverStream(streamId, reason = "manual", actor = null) {
     if (this.isBusy) {
-      throw new Error("已有监控任务正在运行。");
+      throw new Error("A monitoring cycle is already running.");
     }
 
-    const monitorConfig = this.database.getMonitorConfig();
     const allowedIds = new Set(this.database.listStreams(false, actor).map((item) => item.id));
-    const stream = monitorConfig.streams.find((item) => item.id === streamId && allowedIds.has(item.id));
+    const stream = this.database.listStreams(true, actor).find((item) => item.id === streamId && allowedIds.has(item.id));
     if (!stream) {
-      throw new Error(`未找到直播流：${streamId}`);
+      throw new Error(`Stream not found: ${streamId}`);
     }
 
-    const server = monitorConfig.servers.find((item) => item.id === stream.serverId);
+    const server = this.database.listServers(true, actor).find((item) => item.id === stream.serverId);
     if (!server) {
-      throw new Error(`未找到服务器：${stream.serverId}`);
+      throw new Error(`Server not found: ${stream.serverId}`);
     }
 
     this.isBusy = true;
@@ -372,8 +375,13 @@ export class StreamMonitor {
     });
     this.setMeta({ isBusy: true });
 
-    const session = new SshSession(server, monitorConfig.runtime.connectionTimeoutSeconds);
+    const runtimeSettings = this.database.getRuntimeSettings();
+    const session = new SshSession(server, runtimeSettings.connectionTimeoutSeconds);
     try {
+      if (!stream.enabled) {
+        this.database.setStreamEnabled(stream.id, true, actor);
+      }
+
       await session.connect();
       const processes = await collectProcesses(session);
       const existingMatch = findMatchingProcess(processes, stream.matchTerms);
@@ -397,15 +405,94 @@ export class StreamMonitor {
       const outcome = await this.tryRestartStream(
         session,
         server,
-        stream,
+        { ...stream, enabled: true },
         processes,
         "manual",
-        monitorConfig.runtime.connectionTimeoutSeconds,
-        monitorConfig.runtime.defaultVerifyDelaySeconds
+        runtimeSettings.connectionTimeoutSeconds,
+        runtimeSettings.defaultVerifyDelaySeconds
       );
       return {
         ok: outcome.ok,
         message: outcome.message
+      };
+    } finally {
+      session.close();
+      this.isBusy = false;
+      this.setMeta({ isBusy: false });
+    }
+  }
+
+  async stopStream(streamId, reason = "manual", actor = null) {
+    if (this.isBusy) {
+      throw new Error("A monitoring cycle is already running.");
+    }
+
+    const allowedIds = new Set(this.database.listStreams(false, actor).map((item) => item.id));
+    const stream = this.database.listStreams(true, actor).find((item) => item.id === streamId && allowedIds.has(item.id));
+    if (!stream) {
+      throw new Error(`Stream not found: ${streamId}`);
+    }
+
+    const server = this.database.listServers(true, actor).find((item) => item.id === stream.serverId);
+    if (!server) {
+      throw new Error(`Server not found: ${stream.serverId}`);
+    }
+
+    const runtimeSettings = this.database.getRuntimeSettings();
+
+    this.isBusy = true;
+    this.recordEvent("warn", "stream.manual_stop", "Manual stream stop requested", {
+      streamId,
+      reason
+    });
+    this.setMeta({ isBusy: true });
+
+    const session = new SshSession(server, runtimeSettings.connectionTimeoutSeconds);
+    try {
+      await session.connect();
+      const processes = await collectProcesses(session);
+      const matches = findMatchingProcesses(processes, stream.matchTerms);
+      const discoveredCommand = matches[0]?.args ?? stream.discoveredCommand ?? "";
+
+      if (matches.length > 0) {
+        const pids = matches.map((process) => process.pid).filter(Boolean);
+        await session.run(`kill -TERM ${pids.join(" ")}`, runtimeSettings.connectionTimeoutSeconds);
+        await delay(1500);
+
+        const afterTerm = await collectProcesses(session);
+        const remainingAfterTerm = findMatchingProcesses(afterTerm, stream.matchTerms);
+        if (remainingAfterTerm.length > 0) {
+          const remainingPids = remainingAfterTerm.map((process) => process.pid).filter(Boolean);
+          await session.run(`kill -KILL ${remainingPids.join(" ")}`, runtimeSettings.connectionTimeoutSeconds);
+          await delay(1000);
+
+          const afterKill = await collectProcesses(session);
+          if (findMatchingProcesses(afterKill, stream.matchTerms).length > 0) {
+            throw new Error(`Unable to stop ffmpeg for ${stream.label}.`);
+          }
+        }
+      }
+
+      this.database.setStreamEnabled(stream.id, false, actor);
+      this.database.updateStreamRuntime(stream.id, {
+        status: "stopped",
+        lastSeenAt: matches.length > 0 ? new Date().toISOString() : stream.lastSeenAt,
+        lastRestartAt: stream.lastRestartAt,
+        restartHistory: [],
+        lastError: null,
+        discoveredCommand
+      });
+      this.recordEvent("warn", "stream.stopped", "Stream was stopped manually", {
+        streamId,
+        serverId: server.id,
+        stoppedProcesses: matches.length
+      });
+
+      return {
+        ok: true,
+        message: matches.length > 0
+          ? `${stream.label} has been stopped and automatic recovery was disabled.`
+          : `${stream.label} had no matching ffmpeg process, and automatic recovery was disabled.`
       };
     } finally {
       session.close();
@@ -528,7 +615,7 @@ export class StreamMonitor {
         serverId: server.id,
         secondsSinceRestart
       });
-      return { ok: false, message: "当前处于冷却期，已跳过重启。", processes };
+      return { ok: false, message: "Restart skipped because the stream is still in cooldown.", processes };
     }
 
     if (restartHistory.length >= (stream.maxRestartsInWindow ?? 3)) {

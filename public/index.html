@@ -245,6 +245,7 @@
                   <option value="restarting">restarting</option>
                   <option value="cooldown">cooldown</option>
                   <option value="failed">failed</option>
+                  <option value="stopped">stopped</option>
                   <option value="unknown">unknown</option>
                 </select>
                 <select id="opsGroupFilter">
@@ -288,6 +289,7 @@
                   <option value="restarting">restarting</option>
                   <option value="cooldown">cooldown</option>
                   <option value="failed">failed</option>
+                  <option value="stopped">stopped</option>
                   <option value="unknown">unknown</option>
                 </select>
               </div>
@@ -371,6 +373,7 @@
               <div class="inline-actions">
                 <button id="saveAndStartStreamButton" class="button secondary" type="button">保存并立即开播</button>
                 <button id="saveStreamButton" class="button primary" type="button">保存直播流</button>
+                <button id="stopStreamButton" class="button danger hidden" type="button">关闭当前直播</button>
                 <button id="duplicateStreamButton" class="button ghost hidden" type="button">复制当前配置</button>
                 <button id="resetStreamButton" class="button ghost" type="button">清空表单</button>
               </div>
@@ -509,17 +512,36 @@
                 </div>
                 <span class="badge">密码更新</span>
               </div>
-              <form id="passwordForm" class="form-grid">
-                <label>
-                  <span>当前密码</span>
-                  <input name="currentPassword" type="password" required />
-                </label>
-                <label>
-                  <span>新密码</span>
-                  <input name="nextPassword" type="password" minlength="8" required />
-                </label>
-                <button class="button primary" type="submit">更新密码</button>
-              </form>
+              <div class="security-grid">
+                <form id="passwordForm" class="form-grid inset-panel">
+                  <p class="eyebrow">LOGIN PASSWORD</p>
+                  <label>
+                    <span>当前密码</span>
+                    <input name="currentPassword" type="password" required />
+                  </label>
+                  <label>
+                    <span>新密码</span>
+                    <input name="nextPassword" type="password" minlength="8" required />
+                  </label>
+                  <button class="button primary" type="submit">更新登录密码</button>
+                </form>
+
+                <form id="secondaryPasswordForm" class="form-grid inset-panel">
+                  <p class="eyebrow">SECOND FACTOR</p>
+                  <div id="secondaryPasswordHint" class="subtle">
+                    二次密码默认等于登录密码。设置独立二次密码后，关闭直播等高风险操作需要输入它。
+                  </div>
+                  <label>
+                    <span>当前二次密码</span>
+                    <input name="currentPassword" type="password" autocomplete="current-password" required />
+                  </label>
+                  <label>
+                    <span>新二次密码</span>
+                    <input name="nextPassword" type="password" autocomplete="new-password" minlength="8" required />
+                  </label>
+                  <button class="button secondary" type="submit">更新二次密码</button>
+                </form>
+              </div>
             </section>
           </section>
         </div>
@@ -527,6 +549,31 @@
     </main>
 
     <div id="toast" class="toast hidden"></div>
+    <div id="stopStreamModal" class="modal-shell hidden" aria-hidden="true">
+      <div class="modal-backdrop" data-modal-close="stop-stream"></div>
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="stopStreamModalTitle">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">STOP STREAM</p>
+            <h3 id="stopStreamModalTitle">关闭直播确认</h3>
+          </div>
+          <button class="button ghost small" type="button" data-modal-close="stop-stream">取消</button>
+        </div>
+        <p class="subtle">
+          即将关闭 <strong id="stopStreamTarget">-</strong> 的 ffmpeg 推流进程，并自动停用这路直播的自动恢复。
+        </p>
+        <form id="stopStreamForm" class="form-grid">
+          <label>
+            <span>二次密码</span>
+            <input name="secondaryPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <div class="inline-actions">
+            <button class="button danger" type="submit">确认关闭直播</button>
+            <button class="button ghost" type="button" data-modal-close="stop-stream">我再想想</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <script type="module" src="/app.next.js"></script>
   </body>
 </html>

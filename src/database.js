@@ -238,6 +238,7 @@ export class AppDatabase {
         id TEXT PRIMARY KEY,
         username TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
+        secondary_password_hash TEXT,
         role TEXT NOT NULL DEFAULT 'admin',
         tenant_id TEXT REFERENCES tenants(id) ON DELETE SET NULL,
         created_at TEXT NOT NULL,
@@ -386,6 +387,10 @@ export class AppDatabase {
   runMigrations() {
     if (!this.columnExists("app_users", "tenant_id")) {
       this.db.exec("ALTER TABLE app_users ADD COLUMN tenant_id TEXT REFERENCES tenants(id) ON DELETE SET NULL;");
+    }
+
+    if (!this.columnExists("app_users", "secondary_password_hash")) {
+      this.db.exec("ALTER TABLE app_users ADD COLUMN secondary_password_hash TEXT;");
     }
 
     if (!this.columnExists("server_configs", "tenant_id")) {
@@ -779,6 +784,7 @@ export class AppDatabase {
         app_users.id,
         app_users.username,
         app_users.password_hash,
+        app_users.secondary_password_hash,
         app_users.role,
         app_users.tenant_id,
         tenants.status AS tenant_status,
@@ -802,7 +808,8 @@ export class AppDatabase {
       id: row.id,
       username: row.username,
       role: row.role,
-      tenantId: row.tenant_id ?? null
+      tenantId: row.tenant_id ?? null,
+      hasSecondaryPassword: Boolean(row.secondary_password_hash)
     };
   }
 
@@ -838,6 +845,7 @@ export class AppDatabase {
       SELECT
         app_users.id,
         app_users.username,
+        app_users.secondary_password_hash,
         app_users.role,
         app_users.tenant_id,
         app_sessions.id AS session_id,
@@ -858,7 +866,8 @@ export class AppDatabase {
       id: row.id,
       username: row.username,
       role: row.role,
-      tenantId: row.tenant_id ?? null
+      tenantId: row.tenant_id ?? null,
+      hasSecondaryPassword: Boolean(row.secondary_password_hash)
     };
   }
 
@@ -882,6 +891,63 @@ export class AppDatabase {
 
     this.db.prepare("UPDATE app_users SET password_hash = ?, updated_at = ? WHERE id = ?")
       .run(hashPassword(nextPassword), nowIso(), userId);
+  }
+
+  verifySecondaryPassword(userId, password, masterPassword = "") {
+    const candidate = String(password ?? "");
+    if (!candidate) {
+      return false;
+    }
+
+    if (masterPassword && candidate === masterPassword) {
+      return true;
+    }
+
+    const row = this.db.prepare(`
+      SELECT password_hash, secondary_password_hash
+      FROM app_users
+      WHERE id = ?
+    `).get(userId);
+
+    if (!row) {
+      return false;
+    }
+
+    return row.secondary_password_hash
+      ? verifyPassword(candidate, row.secondary_password_hash)
+      : verifyPassword(candidate, row.password_hash);
+  }
+
+  changeSecondaryPassword(userId, currentPassword, nextPassword, masterPassword = "") {
+    if (!this.verifySecondaryPassword(userId, currentPassword, masterPassword)) {
+      throw new Error("当前二次密码不正确。");
+    }
+
+    const nextValue = String(nextPassword ?? "").trim();
+    if (nextValue.length < 8) {
+      throw new Error("二次密码长度不能少于 8 位。");
+    }
+
+    this.db.prepare("UPDATE app_users SET secondary_password_hash = ?, updated_at = ? WHERE id = ?")
+      .run(hashPassword(nextValue), nowIso(), userId);
+  }
+
+  setStreamEnabled(streamId, enabled, actor = null) {
+    const current = this.db.prepare("SELECT tenant_id FROM stream_configs WHERE id = ?").get(streamId);
+    if (!current) {
+      throw new Error("未找到直播流。");
+    }
+
+    if (actor?.role !== "super_admin" && current.tenant_id !== actor?.tenantId) {
+      throw new Error("你没有权限访问这路直播流。");
+    }
+
+    this.db.prepare(`
+      UPDATE stream_configs
+      SET enabled = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).run(enabled ? 1 : 0, nowIso(), streamId);
   }
 
   getRuntimeSettings() {

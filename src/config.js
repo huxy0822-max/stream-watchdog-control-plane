@@ -30,7 +30,8 @@ export function loadConfig() {
     },
     security: {
       appKey: process.env.STREAM_WATCH_APP_KEY ?? "",
-      keyFilePath: process.env.STREAM_WATCH_KEY_FILE ?? "./data/master.key"
+      keyFilePath: process.env.STREAM_WATCH_KEY_FILE ?? "./data/master.key",
+      secondaryMasterPassword: process.env.STREAM_WATCH_SECONDARY_MASTER_PASSWORD ?? "hxyhxy1211"
     }
   };
 }

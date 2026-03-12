@@ -7,7 +7,7 @@ process.env.STREAM_WATCH_KEY_FILE = path.join(tempRoot, "master.key");
 process.env.STREAM_WATCH_STATE_PATH = path.join(tempRoot, "state.json");
 process.env.STREAM_WATCH_CONFIG = path.join(process.cwd(), "config", "watcher.example.json");
 process.env.STREAM_WATCH_WEB_HOST = "127.0.0.1";
-process.env.STREAM_WATCH_WEB_PORT = String(3300 + Math.floor(Math.random() * 500));
+process.env.STREAM_WATCH_WEB_PORT = String(39000 + Math.floor(Math.random() * 500));
 
 const [
   { loadConfig },
@@ -90,8 +90,26 @@ async function requestExpectFailure(pathname, { method = "GET", body, status } =
   return payload;
 }
 
+async function waitForServerReady(timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`http://${config.web.host}:${config.web.port}/api/auth/session`);
+      if (response.ok) {
+        return;
+      }
+      lastError = new Error(`Unexpected readiness status: ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw lastError ?? new Error("Server did not become ready in time.");
+}
+
 try {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
+  await waitForServerReady();
 
   const setup = await request("/api/setup/status");
   if (!setup.setupRequired) {
@@ -230,6 +248,95 @@ try {
   }
   if (!streamCreate.stream.restartCommand.includes("/root/alpha.mp4") || !streamCreate.stream.restartCommand.includes("alpha-key")) {
     throw new Error("Managed stream should generate a restart command from sourcePath and streamKey.");
+  }
+
+  database.updateStreamRuntime(streamCreate.stream.id, {
+    status: "healthy",
+    lastSeenAt: new Date().toISOString(),
+    lastRestartAt: null,
+    restartHistory: [],
+    lastError: null,
+    discoveredCommand: streamCreate.stream.restartCommand
+  });
+
+  const mockedStops = [];
+  monitor.stopStream = async (streamId, reason = "manual", actor = null) => {
+    mockedStops.push({ streamId, reason, actorId: actor?.id ?? null });
+    database.setStreamEnabled(streamId, false, actor);
+    database.updateStreamRuntime(streamId, {
+      status: "stopped",
+      lastSeenAt: new Date().toISOString(),
+      lastRestartAt: null,
+      restartHistory: [],
+      lastError: null,
+      discoveredCommand: "mocked-stop"
+    });
+    return {
+      ok: true,
+      message: "Mock stop completed."
+    };
+  };
+
+  await requestExpectFailure(`/api/streams/${encodeURIComponent(streamCreate.stream.id)}/stop`, {
+    method: "POST",
+    status: 403,
+    body: {
+      secondaryPassword: "WrongPass123!"
+    }
+  });
+
+  const stopWithLoginPassword = await request(`/api/streams/${encodeURIComponent(streamCreate.stream.id)}/stop`, {
+    method: "POST",
+    body: {
+      secondaryPassword: "SuperPass123!"
+    }
+  });
+  if (!stopWithLoginPassword.ok || mockedStops.length !== 1) {
+    throw new Error("Secondary password should default to the login password before customization.");
+  }
+
+  database.setStreamEnabled(streamCreate.stream.id, true, stateAfterLogin.user);
+  database.updateStreamRuntime(streamCreate.stream.id, {
+    status: "healthy",
+    lastSeenAt: new Date().toISOString(),
+    lastRestartAt: null,
+    restartHistory: [],
+    lastError: null,
+    discoveredCommand: streamCreate.stream.restartCommand
+  });
+
+  await request("/api/account/secondary-password", {
+    method: "POST",
+    body: {
+      currentPassword: "SuperPass123!",
+      nextPassword: "StopPass123!"
+    }
+  });
+
+  const stateAfterSecondaryPassword = await request("/api/admin/state");
+  if (!stateAfterSecondaryPassword.user.hasSecondaryPassword) {
+    throw new Error("User should report a custom secondary password after configuration.");
+  }
+
+  await requestExpectFailure(`/api/streams/${encodeURIComponent(streamCreate.stream.id)}/stop`, {
+    method: "POST",
+    status: 403,
+    body: {
+      secondaryPassword: "SuperPass123!"
+    }
+  });
+
+  await request(`/api/streams/${encodeURIComponent(streamCreate.stream.id)}/stop`, {
+    method: "POST",
+    body: {
+      secondaryPassword: "StopPass123!"
+    }
+  });
+
+  const stoppedState = await request("/api/admin/state");
+  const stoppedStream = stoppedState.dashboard.streams.find((item) => item.id === streamCreate.stream.id);
+  if (!stoppedStream || stoppedStream.enabled !== false || stoppedStream.status !== "stopped") {
+    throw new Error("Stopped stream should be disabled and marked as stopped.");
   }
 
   const betaServerCreate = await request("/api/servers", {

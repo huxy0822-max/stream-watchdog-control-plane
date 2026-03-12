@@ -300,6 +300,20 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
     res.json(result);
   }));
 
+  app.post("/api/streams/:streamId/stop", requireAuth, createAsyncHandler(logger, async (req, res) => {
+    if (!database.verifySecondaryPassword(
+      req.sessionUser.id,
+      req.body.secondaryPassword,
+      config.security.secondaryMasterPassword
+    )) {
+      res.status(403).json({ ok: false, message: "二次密码验证失败。" });
+      return;
+    }
+
+    const result = await monitor.stopStream(req.params.streamId, "dashboard", req.sessionUser);
+    res.json(result);
+  }));
+
   app.post("/api/servers", requireAuth, createAsyncHandler(logger, async (req, res) => {
     const server = database.saveServer({
       tenantId: req.body.tenantId,
@@ -443,6 +457,16 @@ export function startWebServer({ config, database, monitor, notifier, logger, ru
 
   app.post("/api/account/password", requireAuth, createAsyncHandler(logger, async (req, res) => {
     database.changePassword(req.sessionUser.id, req.body.currentPassword, req.body.nextPassword);
+    res.json({ ok: true });
+  }));
+
+  app.post("/api/account/secondary-password", requireAuth, createAsyncHandler(logger, async (req, res) => {
+    database.changeSecondaryPassword(
+      req.sessionUser.id,
+      req.body.currentPassword,
+      req.body.nextPassword,
+      config.security.secondaryMasterPassword
+    );
     res.json({ ok: true });
   }));
 
