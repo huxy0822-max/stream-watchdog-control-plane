@@ -13,7 +13,7 @@ const [
   { loadConfig },
   { AppDatabase },
   { createLogger },
-  { StreamMonitor },
+  { StreamMonitor, findMatchingProcess, findProcessesByStreamKey },
   { EmailNotifier },
   { RuntimeMetrics },
   { loadOrCreateMasterKey },
@@ -106,6 +106,55 @@ async function waitForServerReady(timeoutMs = 10000) {
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw lastError ?? new Error("Server did not become ready in time.");
+}
+
+function buildPsOutput(processes) {
+  return processes
+    .map((process) => `${process.pid} ${process.args}`)
+    .join("\n");
+}
+
+function createFakeSshSession(initialProcesses, spawnProcessForCommand = null) {
+  let processes = initialProcesses.map((process) => ({ ...process }));
+  let nextPid = 7000;
+  const commands = [];
+
+  return {
+    commands,
+    snapshot() {
+      return processes.map((process) => ({ ...process }));
+    },
+    async run(command) {
+      commands.push(command);
+
+      if (command === "ps -eo pid=,args= | grep [f]fmpeg || true") {
+        return {
+          stdout: buildPsOutput(processes),
+          stderr: "",
+          code: 0
+        };
+      }
+
+      if (command.startsWith("kill -TERM ") || command.startsWith("kill -KILL ")) {
+        const pids = command.split(/\s+/).slice(2).filter(Boolean);
+        processes = processes.filter((process) => !pids.includes(String(process.pid)));
+        return { stdout: "", stderr: "", code: 0 };
+      }
+
+      if (typeof spawnProcessForCommand === "function") {
+        const spawnedProcess = spawnProcessForCommand(command, nextPid);
+        if (spawnedProcess) {
+          nextPid += 1;
+          processes.push({
+            pid: String(spawnedProcess.pid ?? nextPid),
+            args: spawnedProcess.args
+          });
+        }
+      }
+
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  };
 }
 
 try {
@@ -250,13 +299,130 @@ try {
     throw new Error("Managed stream should generate a restart command from sourcePath and streamKey.");
   }
 
-  database.updateStreamRuntime(streamCreate.stream.id, {
+  const streamUpdate = await request(`/api/streams/${encodeURIComponent(streamCreate.stream.id)}`, {
+    method: "PUT",
+    body: {
+      tenantId,
+      serverId: serverCreate.server.id,
+      label: "Alpha Managed Stream",
+      sourcePath: "/root/alpha.mp4",
+      streamKey: "alpha-key",
+      matchTerms: ["legacy-wrong-term"],
+      cooldownSeconds: 60,
+      restartWindowSeconds: 300,
+      maxRestartsInWindow: 3,
+      verifyDelaySeconds: 2,
+      enabled: false
+    }
+  });
+
+  if (
+    streamUpdate.stream.matchTerms.length !== 2
+    || streamUpdate.stream.matchTerms[0] !== "alpha-key"
+    || streamUpdate.stream.matchTerms[1] !== "/root/alpha.mp4"
+  ) {
+    throw new Error("Managed streams should ignore custom match terms and always use sourcePath + streamKey.");
+  }
+
+  const exactManagedProcess = {
+    pid: "8001",
+    args: "ffmpeg -stream_loop -1 -re -i /root/alpha.mp4 -c:v copy -c:a copy -f flv rtmp://a.rtmp.youtube.com/live2/alpha-key"
+  };
+  const staleManagedStream = {
+    ...database.getStreamForRecovery(streamUpdate.stream.id),
+    matchTerms: ["legacy-wrong-term"],
+    status: "failed"
+  };
+
+  if (!findMatchingProcess([exactManagedProcess], staleManagedStream)) {
+    throw new Error("Managed stream matching should use sourcePath + streamKey even when stale match terms exist.");
+  }
+
+  database.updateStreamRuntime(streamUpdate.stream.id, {
+    status: "failed",
+    lastSeenAt: null,
+    lastRestartAt: null,
+    restartHistory: [],
+    lastError: "stale terms",
+    discoveredCommand: ""
+  });
+
+  const inspectSession = createFakeSshSession([exactManagedProcess]);
+  await monitor.inspectStream(
+    inspectSession,
+    serverCreate.server,
+    staleManagedStream,
+    inspectSession.snapshot(),
+    5
+  );
+  if (inspectSession.commands.length !== 0) {
+    throw new Error("Healthy managed streams should not trigger restart commands when sourcePath + streamKey already match.");
+  }
+
+  const inspectedStream = database.getStreamForRecovery(streamUpdate.stream.id);
+  if (inspectedStream?.status !== "healthy") {
+    throw new Error("Managed stream should recover to healthy when an exact sourcePath + streamKey process is already running.");
+  }
+
+  database.updateStreamRuntime(streamUpdate.stream.id, {
+    status: "failed",
+    lastSeenAt: null,
+    lastRestartAt: null,
+    restartHistory: [],
+    lastError: "duplicate key test",
+    discoveredCommand: ""
+  });
+
+  const restartTargetStream = {
+    ...database.getStreamForRecovery(streamUpdate.stream.id),
+    status: "failed",
+    lastSeenAt: null,
+    lastRestartAt: null,
+    restartHistory: [],
+    lastError: null,
+    verifyDelaySeconds: 0
+  };
+  const competingProcess = {
+    pid: "9001",
+    args: "ffmpeg -stream_loop -1 -re -i /root/stale-alpha.mp4 -c:v copy -c:a copy -f flv rtmp://a.rtmp.youtube.com/live2/alpha-key"
+  };
+  const restartSession = createFakeSshSession([competingProcess], (command, nextPid) => {
+    if (command === restartTargetStream.restartCommand) {
+      return {
+        pid: String(nextPid),
+        args: "ffmpeg -stream_loop -1 -re -i /root/alpha.mp4 -c:v copy -c:a copy -f flv rtmp://a.rtmp.youtube.com/live2/alpha-key"
+      };
+    }
+
+    return null;
+  });
+  const restartOutcome = await monitor.tryRestartStream(
+    restartSession,
+    serverCreate.server,
+    restartTargetStream,
+    restartSession.snapshot(),
+    "scheduled",
+    5,
+    0
+  );
+
+  if (!restartOutcome.ok) {
+    throw new Error("Managed stream restart should succeed after removing competing processes for the same stream key.");
+  }
+  if (!restartSession.commands.some((command) => command === "kill -TERM 9001")) {
+    throw new Error("Restart flow should terminate competing ffmpeg processes that already use the same YouTube stream key.");
+  }
+  if (findProcessesByStreamKey(restartSession.snapshot(), "alpha-key").length !== 1) {
+    throw new Error("Exactly one ffmpeg process should remain for a given YouTube stream key after restart.");
+  }
+
+  database.updateStreamRuntime(streamUpdate.stream.id, {
     status: "healthy",
     lastSeenAt: new Date().toISOString(),
     lastRestartAt: null,
     restartHistory: [],
     lastError: null,
-    discoveredCommand: streamCreate.stream.restartCommand
+    discoveredCommand: streamUpdate.stream.restartCommand
   });
 
   const mockedStops = [];

@@ -1396,13 +1396,17 @@ export class AppDatabase {
     `).all(...scope.params).map((row) => {
       const discoveredCommand = decryptText(row.discovered_command_enc, this.masterKey) ?? "";
       const managed = parseManagedStreamFields(row.restart_command ?? "", discoveredCommand);
+      const storedMatchTerms = parseJson(row.match_terms_json, []);
+      const managedMatchTerms = managed.sourcePath && managed.streamKey
+        ? buildManagedMatchTerms(managed.sourcePath, managed.streamKey)
+        : [];
       return {
         id: row.id,
         tenantId: row.tenant_id ?? null,
         serverId: row.server_id,
         serverLabel: row.server_label,
         label: row.label,
-        matchTerms: parseJson(row.match_terms_json, []),
+        matchTerms: managedMatchTerms.length > 0 ? managedMatchTerms : storedMatchTerms,
         restartCommand: row.restart_command ?? "",
         restartLogPath: row.restart_log_path ?? "",
         discoveredCommand: includeSecrets ? discoveredCommand : "",
@@ -1451,13 +1455,15 @@ export class AppDatabase {
     }
 
     const fallbackMatchTerms = managedMode ? buildManagedMatchTerms(sourcePath, streamKey) : [];
-    const matchTerms = Array.isArray(input.matchTerms)
+    const requestedMatchTerms = Array.isArray(input.matchTerms)
       ? input.matchTerms.map((item) => String(item).trim()).filter(Boolean)
       : current
         ? parseJson(current.match_terms_json, [])
         : fallbackMatchTerms;
 
-    const finalMatchTerms = matchTerms.length > 0 ? [...new Set(matchTerms)] : fallbackMatchTerms;
+    const finalMatchTerms = managedMode
+      ? fallbackMatchTerms
+      : (requestedMatchTerms.length > 0 ? [...new Set(requestedMatchTerms)] : fallbackMatchTerms);
 
     if (finalMatchTerms.length === 0) {
       throw new Error("至少需要填写一个匹配关键词。");

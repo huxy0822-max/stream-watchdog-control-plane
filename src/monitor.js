@@ -92,12 +92,80 @@ function parseProcessLines(stdout) {
     .filter(Boolean);
 }
 
-function findMatchingProcess(processes, matchTerms) {
-  return processes.find((process) => matchTerms.every((term) => process.args.includes(term))) ?? null;
+function normalizeMatchTerms(matchTerms) {
+  return Array.isArray(matchTerms)
+    ? matchTerms.map((term) => String(term).trim()).filter(Boolean)
+    : [];
 }
 
-function findMatchingProcesses(processes, matchTerms) {
-  return processes.filter((process) => matchTerms.every((term) => process.args.includes(term)));
+function getManagedStreamIdentity(stream) {
+  const sourcePath = normalizeMediaPath(stream?.sourcePath ?? "");
+  const streamKey = normalizeStreamKey(stream?.streamKey ?? "");
+  if (!sourcePath || !streamKey) {
+    return null;
+  }
+
+  return { sourcePath, streamKey };
+}
+
+export function processMatchesStream(stream, process) {
+  const managedIdentity = getManagedStreamIdentity(stream);
+  if (managedIdentity) {
+    const parsed = parseManagedStreamFields(process?.args ?? "");
+    return parsed.sourcePath === managedIdentity.sourcePath
+      && parsed.streamKey === managedIdentity.streamKey;
+  }
+
+  const matchTerms = normalizeMatchTerms(stream?.matchTerms ?? stream);
+  return matchTerms.length > 0
+    && matchTerms.every((term) => String(process?.args ?? "").includes(term));
+}
+
+export function findMatchingProcess(processes, stream) {
+  return processes.find((process) => processMatchesStream(stream, process)) ?? null;
+}
+
+export function findMatchingProcesses(processes, stream) {
+  return processes.filter((process) => processMatchesStream(stream, process));
+}
+
+export function findProcessesByStreamKey(processes, streamKey) {
+  const normalizedKey = normalizeStreamKey(streamKey);
+  if (!normalizedKey) {
+    return [];
+  }
+
+  return processes.filter((process) => parseManagedStreamFields(process.args).streamKey === normalizedKey);
+}
+
+async function terminateProcesses(session, processes, connectionTimeoutSeconds) {
+  const targetPids = [...new Set(processes.map((process) => String(process.pid).trim()).filter(Boolean))];
+  if (targetPids.length === 0) {
+    return collectProcesses(session);
+  }
+
+  await session.run(`kill -TERM ${targetPids.join(" ")}`, connectionTimeoutSeconds);
+  await delay(1500);
+
+  let remainingProcesses = await collectProcesses(session);
+  let stubbornPids = remainingProcesses
+    .map((process) => String(process.pid).trim())
+    .filter((pid) => targetPids.includes(pid));
+
+  if (stubbornPids.length > 0) {
+    await session.run(`kill -KILL ${stubbornPids.join(" ")}`, connectionTimeoutSeconds);
+    await delay(1000);
+    remainingProcesses = await collectProcesses(session);
+    stubbornPids = remainingProcesses
+      .map((process) => String(process.pid).trim())
+      .filter((pid) => targetPids.includes(pid));
+  }
+
+  if (stubbornPids.length > 0) {
+    throw new Error(`Unable to stop ffmpeg processes: ${stubbornPids.join(", ")}`);
+  }
+
+  return remainingProcesses;
 }
 
 async function collectProcesses(session) {
@@ -384,7 +452,7 @@ export class StreamMonitor {
 
       await session.connect();
       const processes = await collectProcesses(session);
-      const existingMatch = findMatchingProcess(processes, stream.matchTerms);
+      const existingMatch = findMatchingProcess(processes, stream);
       if (existingMatch) {
         this.database.updateStreamRuntime(stream.id, {
           status: "healthy",
@@ -451,26 +519,11 @@ export class StreamMonitor {
     try {
       await session.connect();
       const processes = await collectProcesses(session);
-      const matches = findMatchingProcesses(processes, stream.matchTerms);
+      const matches = findMatchingProcesses(processes, stream);
       const discoveredCommand = matches[0]?.args ?? stream.discoveredCommand ?? "";
 
       if (matches.length > 0) {
-        const pids = matches.map((process) => process.pid).filter(Boolean);
-        await session.run(`kill -TERM ${pids.join(" ")}`, runtimeSettings.connectionTimeoutSeconds);
-        await delay(1500);
-
-        const afterTerm = await collectProcesses(session);
-        const remainingAfterTerm = findMatchingProcesses(afterTerm, stream.matchTerms);
-        if (remainingAfterTerm.length > 0) {
-          const remainingPids = remainingAfterTerm.map((process) => process.pid).filter(Boolean);
-          await session.run(`kill -KILL ${remainingPids.join(" ")}`, runtimeSettings.connectionTimeoutSeconds);
-          await delay(1000);
-
-          const afterKill = await collectProcesses(session);
-          if (findMatchingProcesses(afterKill, stream.matchTerms).length > 0) {
-            throw new Error(`Unable to stop ffmpeg for ${stream.label}.`);
-          }
-        }
+        await terminateProcesses(session, matches, runtimeSettings.connectionTimeoutSeconds);
       }
 
       this.database.setStreamEnabled(stream.id, false, actor);
@@ -555,7 +608,7 @@ export class StreamMonitor {
   }
 
   async inspectStream(session, server, stream, processes, connectionTimeoutSeconds) {
-    const match = findMatchingProcess(processes, stream.matchTerms);
+    const match = findMatchingProcess(processes, stream);
     const now = new Date().toISOString();
 
     if (match) {
@@ -620,6 +673,7 @@ export class StreamMonitor {
 
     if (restartHistory.length >= (stream.maxRestartsInWindow ?? 3)) {
       const message = `Restart limit reached for ${stream.label} on ${server.label}`;
+      const shouldNotify = stream.status !== "failed" || stream.lastError !== message;
       this.database.updateStreamRuntime(stream.id, {
         status: "failed",
         lastSeenAt: stream.lastSeenAt,
@@ -631,13 +685,16 @@ export class StreamMonitor {
         streamId: stream.id,
         serverId: server.id
       });
-      await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      if (shouldNotify) {
+        await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      }
       return { ok: false, message, processes };
     }
 
     const restartCommand = buildRestartCommand(stream, stream.discoveredCommand);
     if (!restartCommand) {
       const message = `Stream ${stream.label} is down and no restart command has been learned yet. Start it manually once so the watcher can cache the ffmpeg command.`;
+      const shouldNotify = stream.status !== "failed" || stream.lastError !== message;
       this.database.updateStreamRuntime(stream.id, {
         status: "failed",
         lastSeenAt: stream.lastSeenAt,
@@ -649,7 +706,9 @@ export class StreamMonitor {
         streamId: stream.id,
         serverId: server.id
       });
-      await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      if (shouldNotify) {
+        await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      }
       return { ok: false, message, processes };
     }
 
@@ -668,9 +727,23 @@ export class StreamMonitor {
       source
     });
 
+    let refreshedProcesses = processes;
+    const competingProcesses = findProcessesByStreamKey(processes, stream.streamKey);
+    if (competingProcesses.length > 0) {
+      this.recordEvent("warn", "stream.competing_processes", "Stopping competing ffmpeg processes with the same YouTube stream key", {
+        streamId: stream.id,
+        serverId: server.id,
+        streamKey: stream.streamKey,
+        competingPids: competingProcesses.map((process) => process.pid)
+      });
+      refreshedProcesses = await terminateProcesses(session, competingProcesses, connectionTimeoutSeconds);
+    }
+    processes = refreshedProcesses;
+
     const commandResult = await session.run(restartCommand, connectionTimeoutSeconds);
     if (commandResult.code !== 0) {
       const message = `Restart command failed for ${stream.label} on ${server.label}. stderr: ${commandResult.stderr.trim() || "(empty)"}`;
+      const shouldNotify = stream.status !== "failed" || stream.lastError !== message;
       this.database.updateStreamRuntime(stream.id, {
         status: "failed",
         lastSeenAt: stream.lastSeenAt,
@@ -682,13 +755,15 @@ export class StreamMonitor {
         streamId: stream.id,
         serverId: server.id
       });
-      await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      if (shouldNotify) {
+        await this.notifier.send(`[FAILED] ${stream.label}`, message);
+      }
       return { ok: false, message, processes };
     }
 
     await delay((stream.verifyDelaySeconds || defaultVerifyDelaySeconds) * 1000);
     const updatedProcesses = await collectProcesses(session);
-    const recoveredMatch = findMatchingProcess(updatedProcesses, stream.matchTerms);
+    const recoveredMatch = findMatchingProcess(updatedProcesses, stream);
 
     if (recoveredMatch) {
       const message = `Stream ${stream.label} on ${server.label} was restarted successfully.`;
@@ -710,6 +785,7 @@ export class StreamMonitor {
     }
 
     const message = `Restart was attempted for ${stream.label} on ${server.label}, but the ffmpeg process was still not found after verification.`;
+    const shouldNotify = stream.status !== "failed" || stream.lastError !== message;
     this.database.updateStreamRuntime(stream.id, {
       status: "failed",
       lastSeenAt: stream.lastSeenAt,
@@ -722,7 +798,9 @@ export class StreamMonitor {
       serverId: server.id,
       source
     });
-    await this.notifier.send(`[FAILED] ${stream.label}`, message);
+    if (shouldNotify) {
+      await this.notifier.send(`[FAILED] ${stream.label}`, message);
+    }
     return { ok: false, message, processes: updatedProcesses };
   }
 }
