@@ -2508,6 +2508,7 @@ function bindEvents() {
       const form = qs("#streamForm");
       if (form) {
         setStreamFormState(readStreamFormState(form), true);
+        syncManagedStreamPreview(form);
       }
     }
 
@@ -2550,6 +2551,7 @@ function bindEvents() {
     const form = qs("#streamForm");
     if (!form) return;
     setStreamFormState(readStreamFormState(form), true);
+    syncManagedStreamPreview(form);
   });
 
   qs("#appShell").addEventListener("click", async (event) => {
